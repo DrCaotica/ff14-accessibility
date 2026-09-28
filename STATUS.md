@@ -23,8 +23,114 @@ Dalamud-Plugin für FF14 das blinden Spielern via NVDA/TOLK ermöglicht das Spie
   (`AccessibleVendorSell/`, `tools/enable-vendorsell/`). Vor jedem Push prüfen.
 - **BossMod-Hotkeys Minus / Alt+Minus:** nur lokal (Temp-Backup beim
   Release-Push 2026-09-18). **Nie** committen/pushen. Details: PRIVAT.txt.
+- **Arsenal→Inventar ohne Set (ab 2026-09-28):** Strg+Alt+F7 / `/acc arsenal`.
+  Lokal ok (User), **erstmal nicht ins Release** — weiter testen, erst
+  nach ausdrücklicher Freigabe committen/pushen.
 
-## STAND JETZT (2026-09-25): RELEASE v6.08.34
+## STAND JETZT (2026-09-28): RELEASE v6.08.35
+
+>>> VERSION: gesprochen / Tag 6.08.35; Assembly/repo.json/Manifest 6.8.35.0
+    (.NET streicht führende Nullen). Installer unverändert 1.2.2.0.
+
+>>> INHALT:
+    - Handwerker/Sammler: Skills belegen (CraftAction / DoL-Fallback)
+    - Equip-Fehlermeldung: nicht mehr vom Arsenal-Fokus überschrieben
+    - Mini-/Jumbo-Glückskaktor lesen (LotteryDaily / LotteryWeeklyInput)
+
+>>> NIE IM RELEASE: BossMod, AutoDuty-Plugin, AccessibleVendorSell,
+    Craft-Kategorie, Mahjong-WIP, BossMod Minus/Alt+Minus,
+    Arsenal→Inventar (Strg+Alt+F7, lokal weiter testen).
+
+>>> UPDATE: Optionsmenü → Aktualisierung → Nach Aktualisierung suchen.
+
+## STAND DAVOR (2026-09-28): HANDWERKER/SAMMLER — SKILLS BELEGEN
+
+>>> PROBLEM (User): Strg+Numpad0 findet bei Sammler/Handwerker keine Skills
+    (Kampfjobs ok). Log ALC Job 14 Stufe 5: 0 Skills, 7 Nicht-Spieler gefiltert.
+
+>>> URSACHE: Handwerker-Fertigkeiten liegen im Sheet `CraftAction` und auf der
+    Leiste als `HotbarSlotType.CraftAction` — nicht als `Action` mit
+    `IsPlayerAction` (Filter von V4.x für Kampfjobs).
+
+>>> FIX: DoH (ClassJobCategory 33) → CraftAction-Liste + Belegen mit
+    CraftAction. DoL (32): Action wie bisher, Fallback wenn IsPlayerAction
+    leer (ClassJob = aktueller Sammler).
+
+>>> TEST: Als Alchemist / Minenarbeiter Strg+Numpad0 → Skills → Namen
+    (z.B. Bearbeitung / Scharfblick); auf Taste legen; Leiste liest Name.
+>>> ERGEBNIS (User 2026-09-28): funktioniert.
+
+## STAND DAVOR (2026-09-28): ARSENAL OHNE SET → INVENTAR
+
+>>> WUNSCH (User): Alles im Arsenal, was NICHT in einem Ausrüstungsset ist,
+    ins Inventar legen (Platz schaffen für Set-Wechsel).
+
+>>> FIX: `InventoryService.MoveUnregisteredArmouryToBags` —
+    `IsItemRegisteredToGearset` (gleiche Marke wie Inventar-Symbol), dann
+    `InventoryManager.MoveItemSlot` in freie Taschenplätze. Taste
+    Strg+Alt+F7 und `/acc arsenal`.
+
+>>> TEST: Arsenal mit Set-Teilen + Müll → Taste/Befehl → nur Nicht-Set
+    wandert; Ansage „Ins Inventar: N. In Sets belassen: M. Kein Platz: K.“
+    Danach Set anlegen ohne Arsenal-voll-Fehler (wenn Tasche Platz hatte).
+>>> ERGEBNIS (User 2026-09-28): passt — **erstmal NICHT ins Release**
+    (weiter testen). Lokal ok, nicht committen/pushen bis Freigabe.
+
+## STAND DAVOR (2026-09-28): EQUIP-FEHLER WURDE VOM FOKUS ÜBERSCHRIEBEN
+
+>>> PROBLEM (User): Beim Anlegen von Waffe/Rüstung kommt eine Meldung wenn
+    es nicht geht, wird aber nicht vorgelesen.
+
+>>> URSACHE (dalamud.log 09:16:00 / 09:19:58): ErrorToast + ErrorMessage
+    „Du konntest die Klasse nicht wechseln, da die dabei abzulegenden
+    Ausrüstungsgegenstände nicht in dein Arsenal passen.“ — Toast sprach
+    per SpeakInterrupt; ~25 ms später stellte ArmouryBoard den Fokus auf
+    denselben Slot zurück; Fokus-SpeakInterrupt wischte die Fehlermeldung
+    mit dem Gegenstandsnamen weg.
+
+>>> FIX: `TolkService.ProtectFocusInterrupts` nach ErrorToast;
+    Fokus-Pfad nutzt `SpeakFocusInterrupt` (Log `FOCUS-SUPPRESSED`).
+
+>>> TEST: Arsenal/Ausrüstungsset → Anlegen bei vollem Arsenal → komplette
+    Fehlermeldung hörbar; danach weiterblättern wieder normal. Gegenprobe:
+    Zauber „zu weit entfernt“ weiterhin hörbar.
+>>> ERGEBNIS (User 2026-09-28): funktioniert.
+
+## STAND DAVOR (2026-09-26): MINI-GLÜCKSKAKTOR — BRETT UND REIHEN
+
+>>> PROBLEM (User + Dump/Log 09:24): `LotteryDaily` öffnete mit Auszahlungs-
+    Schrott („MGP. Summe. Auszahlung…“); Felder beim Blättern STUMM.
+
+>>> URSACHE: Generischer Open las die Zahlungstabelle; Fokus auf Collision
+    der CheckBox-/Radio-Zellen ohne Text (Ziffer in Kind id=3, einstelllig).
+
+>>> FIX: SpecialSetup `OnLotteryDailyOpen` (Titel, Nr., Hinweis).
+    `TryReadLotteryDailyFocus` — GameBoard-Zellen Zeile/Spalte + Ziffer oder
+    verdeckt; LaneSelector-Reihen mit Summe und MGP aus UI-Tabelle;
+    Bestätigen.
+
+>>> TEST: Los kaufen → Öffnung klar; 3 Felder aufdecken (Position+Zahl);
+    Reihen wählen (Name, Zahlen, Summe/MGP); Bestätigen.
+>>> ERGEBNIS (User 2026-09-26): funktioniert.
+
+## STAND DAVOR (2026-09-26): JUMBO-GLÜCKSKAKTOR — ZIFFERNPAD LESEN
+
+>>> PROBLEM (User + Dump/Log 09:06–09:07): Fenster `LotteryWeeklyInput`
+    öffnete mit „JUMBO-GLÜCKSKAKTOR. Nr. 681“, Zifferntasten beim Blättern
+    komplett stumm ([Focus] STUMM auf Collision id=4).
+
+>>> URSACHE: Fokus auf leerer Collision; Ziffer im Text-Kind id=2 („0“–„9“).
+    Generischer `GetTextFromNodeTree` verwirft einstellige Texte.
+
+>>> FIX: `TryReadLotteryWeeklyInputFocus` — Ziffer + aktive Stelle; vier
+    Radio-Stellen; Kaufen mit Nummer; Schließen (Node id=35). Bild-Knopf
+    id=32 nur per Tooltip (kein geratener Name).
+
+>>> TEST: Los kaufen → Stellen und Ziffern ansagen; Nummer tippen; Kaufen
+    nennt aktuelle Nummer; Schließen hörbar.
+>>> ERGEBNIS (User 2026-09-26): funktioniert.
+
+## STAND DAVOR (2026-09-25): RELEASE v6.08.34
 
 >>> VERSION: gesprochen / Tag 6.08.34; Assembly/repo.json/Manifest 6.8.34.0
     (.NET streicht führende Nullen). Installer unverändert 1.2.2.0.

@@ -227,6 +227,75 @@ public static partial class AccessibilityStrings
     /// toggle they can flip - not just an informational label.</summary>
     public static string SwitchControl => IsGerman ? "Schalter" : "switch";
 
+    // ── Jumbo-Glueckskaktor (LotteryWeeklyInput) ─────────────────────
+    /// <summary>Close chrome on windows that only show the WindowA_Button icon.</summary>
+    public static string CloseControl => IsGerman ? "Schließen" : "Close";
+
+    /// <summary>Digit key on the Jumbo Cactpot pad, with the slot that will receive it.</summary>
+    public static string LotteryWeeklyDigit(string digit, int slot) =>
+        IsGerman ? $"Ziffer {digit}, Stelle {slot}" : $"Digit {digit}, position {slot}";
+
+    /// <summary>Digit key when no slot radio is marked selected.</summary>
+    public static string LotteryWeeklyDigitOnly(string digit) =>
+        IsGerman ? $"Ziffer {digit}" : $"Digit {digit}";
+
+    /// <summary>One of the four ticket digit slots.</summary>
+    public static string LotteryWeeklySlot(int slot, string digit, bool selected)
+    {
+        var state = selected ? RadioSelected : RadioNotSelected;
+        return IsGerman
+            ? $"Stelle {slot}, {digit}, {state}"
+            : $"Position {slot}, {digit}, {state}";
+    }
+
+    /// <summary>Empty digit on a slot that has not been filled yet.</summary>
+    public static string LotteryWeeklyEmptyDigit => IsGerman ? "leer" : "empty";
+
+    /// <summary>Buy button enriched with the number currently on the four slots.</summary>
+    public static string LotteryWeeklyBuy(string buyLabel, string number) =>
+        IsGerman ? $"{buyLabel}, Nummer {number}" : $"{buyLabel}, number {number}";
+
+    // ── Mini-Glueckskaktor (LotteryDaily) ────────────────────────────
+    /// <summary>Fallback when title nodes are not ready yet on open.</summary>
+    public static string LotteryDailyFallbackTitle =>
+        IsGerman ? "Mini-Glückskaktor." : "Mini Cactpot.";
+
+    /// <summary>Covered board cell (row/col 1-based).</summary>
+    public static string LotteryDailyCellCovered(int row, int col) =>
+        IsGerman ? $"Feld Zeile {row}, Spalte {col}, verdeckt"
+                 : $"Cell row {row}, column {col}, covered";
+
+    /// <summary>Revealed board cell with its digit.</summary>
+    public static string LotteryDailyCell(int row, int col, string digit) =>
+        IsGerman ? $"Feld Zeile {row}, Spalte {col}, {digit}"
+                 : $"Cell row {row}, column {col}, {digit}";
+
+    public static string LotteryDailyRow(int n) =>
+        IsGerman ? $"Zeile {n}" : $"Row {n}";
+
+    public static string LotteryDailyColumn(int n) =>
+        IsGerman ? $"Spalte {n}" : $"Column {n}";
+
+    /// <summary>Major diagonal (top-left to bottom-right) — LaneSelector.MajorDiagonal.</summary>
+    public static string LotteryDailyMajorDiagonal =>
+        IsGerman ? "Diagonale links oben nach rechts unten" : "Diagonal top-left to bottom-right";
+
+    /// <summary>Minor diagonal (top-right to bottom-left) — LaneSelector.MinorDiagonal.</summary>
+    public static string LotteryDailyMinorDiagonal =>
+        IsGerman ? "Diagonale rechts oben nach links unten" : "Diagonal top-right to bottom-left";
+
+    public static string LotteryDailyLane(string lane, string digits, string state) =>
+        IsGerman ? $"{lane}, {digits}, {state}" : $"{lane}, {digits}, {state}";
+
+    public static string LotteryDailyLaneWithSum(string lane, string digits, int sum, string state) =>
+        IsGerman ? $"{lane}, {digits}, Summe {sum}, {state}"
+                 : $"{lane}, {digits}, sum {sum}, {state}";
+
+    public static string LotteryDailyLaneWithPayout(
+        string lane, string digits, int sum, string mgp, string state) =>
+        IsGerman ? $"{lane}, {digits}, Summe {sum}, {mgp} MGP, {state}"
+                 : $"{lane}, {digits}, sum {sum}, {mgp} MGP, {state}";
+
     /// <summary>
     /// A switch that has NO name of its own - neither text nor tooltip - named by
     /// the heading of its row plus where it sits in that row.
@@ -2669,7 +2738,6 @@ public static partial class AccessibilityStrings
         IsGerman ? "Kein Ziel zum Folgen. Erst ein Ziel anwählen." : "No target to follow. Select a target first.";
     public static string FollowSelf =>
         IsGerman ? "Das bist du selbst." : "That is you.";
-
     public static string Following(string name) =>
         IsGerman ? $"Folge {name}." : $"Following {name}.";
     public static string FollowStopped =>

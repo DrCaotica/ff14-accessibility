@@ -146,7 +146,7 @@ public sealed class Plugin : IDalamudPlugin
     // Gehoert zum alten System: Enter schreibt in den Kanal, dessen Nachlese
     // gerade gelesen wurde (v5.67). PR #5 hatte das mitgeloescht.
     private readonly ChatChannelService _chatChannel;
-    // [Chat-Absender] Kontextmenü / Anvisieren aus der Nachlese-Zeile.
+    // [Chat-Absender] KontextmenÃ¼ / Anvisieren aus der Nachlese-Zeile.
     private readonly ChatPlayerService _chatPlayer;
     // [Chat-Puffer] Die eigenen Filterzeilen und Register des Spiels. Der Chat-Leser
     // fragt sie, welche Register eine eingehende Zeile zeigen wuerden.
@@ -182,7 +182,7 @@ public sealed class Plugin : IDalamudPlugin
     private readonly DalamudPluginsService _dalamudPlugins;
     private readonly TooltipService _tooltips;
     private readonly TripleTriadService _tripleTriad;
-    // ── [Tiefes Gewoelbe] ──
+    // â”€â”€ [Tiefes Gewoelbe] â”€â”€
     private readonly DeepDungeonText    _deepText;
     private readonly DeepDungeonState   _deepState;
     private readonly DeepDungeonRoomMap _deepRoomMap;
@@ -195,20 +195,20 @@ public sealed class Plugin : IDalamudPlugin
     // 5.86 macht das Jagdtagebuch benutzbar: die Rang-Zeilen sagen endlich, was
     // sie sind, und der Objekt-Browser fuehrt zu den Monstern, die der aktuelle
     // Rang noch verlangt - auch in andere Gebiete.
-    // 6.08.8: Tastenliste im Belegen-Menü: Beschreibung nach „Taste X, Skill“.
-    // 6.08.12: Mitstreiter-Fenster (Buddy) — Zusammenfassung + Reiter.
-    // 6.08.7: Aktionsleisten-Vorlesen nannte Beschreibungen — zurückgenommen,
-    // gemeint war die Tastenliste im Zuweisungsmenü.
+    // 6.08.8: Tastenliste im Belegen-MenÃ¼: Beschreibung nach â€žTaste X, Skillâ€œ.
+    // 6.08.12: Mitstreiter-Fenster (Buddy) â€” Zusammenfassung + Reiter.
+    // 6.08.7: Aktionsleisten-Vorlesen nannte Beschreibungen â€” zurÃ¼ckgenommen,
+    // gemeint war die Tastenliste im ZuweisungsmenÃ¼.
     // 6.08.6: Skill-Belegen liest die ActionTransient-Beschreibung nach dem Namen
     // (Dwell + Speak ohne Interrupt, wie ActionMenu).
     // 6.08: Events = Yo-kai-Zonen (+ Collab-Event-FATEs ab 2026-09-24).
     // 6.07: Event-Gebiete (AdventEvent/MoonFaire/SpecialFate + planevent.lgb).
-    // Craft-Kategorie (Rezepte) bleibt lokal und ist in diesem öffentlichen Stand nicht enthalten.
-    // 6.08.18 lokal: Chat-Absender Kontextmenü (Strg+Umschalt+BildAuf) + Numpad3-Ziel.
-    // 6.08.19: Charakterauswahl — eine Ansage (Name, Job, Ort) statt Scan-Sturm.
-    // 6.08.20: Mitstreiter-Taste (PR 27 Port) — Strg+Umschalt+C öffnet/vorliest.
-    private const string PluginVersion    = "6.08.34";
-    private const string PluginVersionTag = "Quest Accept";
+    // Craft-Kategorie (Rezepte) bleibt lokal und ist in diesem Ã¶ffentlichen Stand nicht enthalten.
+    // 6.08.18 lokal: Chat-Absender KontextmenÃ¼ (Strg+Umschalt+BildAuf) + Numpad3-Ziel.
+    // 6.08.19: Charakterauswahl â€” eine Ansage (Name, Job, Ort) statt Scan-Sturm.
+    // 6.08.20: Mitstreiter-Taste (PR 27 Port) â€” Strg+Umschalt+C Ã¶ffnet/vorliest.
+    private const string PluginVersion    = "6.08.35";
+    private const string PluginVersionTag = "DoH Skills";
 
     public Plugin()
     {
@@ -363,7 +363,7 @@ public sealed class Plugin : IDalamudPlugin
         {
             // ItemCompare und PartyRoster lagen beide auf Strg+Umschalt+F12.
             // Die Zeile hing kurz in Version 13, die bei vielen schon gelaufen
-            // war — deshalb eigener Schritt, sonst blieb ItemCompare auf F12.
+            // war â€” deshalb eigener Schritt, sonst blieb ItemCompare auf F12.
             if (_config.KeyItemCompare == "Strg+Umschalt+F12")
                 _config.KeyItemCompare = "Strg+Umschalt+Einfg";
             _config.Version = 14;
@@ -432,13 +432,13 @@ public sealed class Plugin : IDalamudPlugin
         // Misst, welches Spiel-Signal ehrlich sagt, ob eine Aktion einsetzbar ist -
         // Grundlage fuer die Job-Anzeigen UND die Kombo-Ansage, siehe ActionSignalProbe.
         _actionProbe = new ActionSignalProbe(DataManager, TargetManager, JobGauges, _tolk, Log);
-        // Bestienbaendiger: wo liegt TP / Instinkt? Kein BSTGauge in Dalamud —
+        // Bestienbaendiger: wo liegt TP / Instinkt? Kein BSTGauge in Dalamud â€”
         // siehe BeastmasterGaugeProbe.
         _bstGaugeProbe = new BeastmasterGaugeProbe(ObjectTable, _tolk, Log);
 #endif
         // Echte Zonengrenzen statt Kartensymbol - nur als Zielgeber, siehe ZoneBorderService.
         _zoneBorders = new ZoneBorderService(DataManager, ClientState, Log);
-        // Gegner des gerade LAUFENDEN Freibriefs, für die Freibrief-Kategorie
+        // Gegner des gerade LAUFENDEN Freibriefs, fÃ¼r die Freibrief-Kategorie
         // des Objekt-Browsers (Spielerwunsch 2026-08-18).
         _leveEnemies  = new LevequestEnemyService(DataManager, Log);
         // Die Aufgabenliste, die ein sehender Spieler am Bildschirmrand liest -
@@ -466,8 +466,8 @@ public sealed class Plugin : IDalamudPlugin
         _enemyMarkers = new EnemyMarkerService(ObjectTable, DataManager, _config, Log);
         _navigation   = new NavigationService(ClientState, ObjectTable, TargetManager, _tolk, _beacon, _escape, _cue, _questMarkers, _places, _fishing, _gathering, _fates, _eventAreas, _routes, _shops, _huntingLog, _areaRanges, _aozSources, _xbmSources, _dutyEntrances, _dungeonRoute, _leveEnemies, _objectNames, _objectMemory, _enemyMarkers, _config, DataManager, GameConfig, Log);
         _gatherLog    = new GatherLogService(DataManager, ClientState, _places, Log);
-        // Selbst abgelaufene Spuren über Lücken im Wegenetz - der Auto-Lauf
-        // greift darauf zurück, wo das Netz endet (siehe TrailService).
+        // Selbst abgelaufene Spuren Ã¼ber LÃ¼cken im Wegenetz - der Auto-Lauf
+        // greift darauf zurÃ¼ck, wo das Netz endet (siehe TrailService).
         _trails     = new TrailService(PluginInterface, ObjectTable, ClientState, _tolk, _config, Log);
         // Gemessene Netzluecken und der Vorwaerts-Impuls in eine Zonengrenze.
         // Beide werden VOR dem Auto-Lauf gebaut, weil er sie benutzt; beide sind
@@ -489,7 +489,7 @@ public sealed class Plugin : IDalamudPlugin
         // Spieler tut: ein Spieler geht gleich weiter, eine Absperrung nie.
         _obstacles   = new ObstacleService(ObjectTable, _objectNames, Log);
         _autoWalk.Obstacles = _obstacles;
-        // Freilauf-Anstoß und Kantentöne (Sprung/Absturz). Nach ObstacleService und
+        // Freilauf-AnstoÃŸ und KantentÃ¶ne (Sprung/Absturz). Nach ObstacleService und
         // AutoWalk, weil er beide braucht; vor dem Framework-Tick verdrahtet.
         _movementAudio = new MovementAudioService(
             ObjectTable, Condition, _obstacles, _autoWalk.Navmesh, _cue, _config, Log,
@@ -669,7 +669,7 @@ public sealed class Plugin : IDalamudPlugin
                                       // Handlungen gehen ans Plugin zurueck.
                                       _updates, CheckForUpdate, InstallUpdate);
 
-        // ── [Tiefes Gewoelbe] ──────────────────────────────────────────
+        // â”€â”€ [Tiefes Gewoelbe] â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         // Jede Beschreibung geht durch DeepDungeonText: der Sheet-Text traegt Makros
         // (darunter das Wort, das das jeweilige Gewoelbe fuer eine Ebene benutzt), die
         // ExtractText() wegwirft - der Auswerter des Spiels loest sie auf.
@@ -721,7 +721,7 @@ public sealed class Plugin : IDalamudPlugin
             BeginDungeonPathFetch(announceStart: false);
     }
 
-    // ── [Dungeon-Wege] ────────────────────────────────────────────────
+    // â”€â”€ [Dungeon-Wege] â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     /// <summary>Vom Optionsmenue ausgeloest: laedt die Wegdateien neu, mit
     /// gesprochener Quittung schon beim Start.</summary>
@@ -791,7 +791,7 @@ public sealed class Plugin : IDalamudPlugin
         });
     }
 
-    // ── [Aktualisierung] ──────────────────────────────────────────────────────
+    // â”€â”€ [Aktualisierung] â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     /// <summary>
     /// Fragt GitHub nach einer neueren Fassung und sagt das Ergebnis an.
@@ -905,10 +905,10 @@ public sealed class Plugin : IDalamudPlugin
 
     private void RegisterCommands()
     {
-        // /acc nav  â†’ Richtung zum Ziel
-        // /acc set  â†’ Aktuelles Spielziel verfolgen
-        // /acc near â†’ Objekte in der Nähe
-        // /acc stop â†’ Sprache stoppen
+        // /acc nav  Ã¢â€ â€™ Richtung zum Ziel
+        // /acc set  Ã¢â€ â€™ Aktuelles Spielziel verfolgen
+        // /acc near Ã¢â€ â€™ Objekte in der NÃ¤he
+        // /acc stop Ã¢â€ â€™ Sprache stoppen
         CommandManager.AddHandler("/acc", new CommandInfo(OnCommand)
         {
             HelpMessage = "FF14 Accessibility: nav, set, near, keys, stop, help"
@@ -919,7 +919,7 @@ public sealed class Plugin : IDalamudPlugin
     {
         var trimmed = args.Trim();
 
-        // "dump" nimmt einen optionalen Addon-Namen â€” muss vor dem switch geprüft werden
+        // "dump" nimmt einen optionalen Addon-Namen Ã¢â‚¬â€ muss vor dem switch geprÃ¼ft werden
         if (trimmed.StartsWith("dump", StringComparison.OrdinalIgnoreCase))
         {
             var dumpArg = trimmed.Length > 4 ? trimmed[4..].Trim() : string.Empty;
@@ -927,8 +927,8 @@ public sealed class Plugin : IDalamudPlugin
             return;
         }
 
-        // "trail loeschen <nr>" nimmt eine Nummer - vor dem switch prüfen.
-        // Die Nummer ist die aus "/acc trails", also pro Gebiet gezählt.
+        // "trail loeschen <nr>" nimmt eine Nummer - vor dem switch prÃ¼fen.
+        // Die Nummer ist die aus "/acc trails", also pro Gebiet gezÃ¤hlt.
         if (trimmed.StartsWith("trail ", StringComparison.OrdinalIgnoreCase))
         {
             var arg = trimmed[6..].Trim();
@@ -936,7 +936,7 @@ public sealed class Plugin : IDalamudPlugin
             if (parts.Length == 2 &&
                 (parts[0].Equals("del", StringComparison.OrdinalIgnoreCase) ||
                  parts[0].Equals("loesch", StringComparison.OrdinalIgnoreCase) ||
-                 parts[0].Equals("löschen", StringComparison.OrdinalIgnoreCase)) &&
+                 parts[0].Equals("lÃ¶schen", StringComparison.OrdinalIgnoreCase)) &&
                 int.TryParse(parts[1], out var number))
             {
                 _trails.DeleteTrail(number);
@@ -948,7 +948,7 @@ public sealed class Plugin : IDalamudPlugin
             return;
         }
 
-        // "lang" nimmt ein Sprach-Argument (de/en/auto) - vor dem switch prüfen
+        // "lang" nimmt ein Sprach-Argument (de/en/auto) - vor dem switch prÃ¼fen
         if (trimmed.StartsWith("lang", StringComparison.OrdinalIgnoreCase))
         {
             var langArg = trimmed.Length > 4 ? trimmed[4..].Trim() : string.Empty;
@@ -1043,7 +1043,7 @@ public sealed class Plugin : IDalamudPlugin
             case "enemies":
                 _tolk.SpeakInterrupt(_enemyMarkers.DescribeField());
                 break;
-            // Mitgliedschaft vs. Agent-Tab vs. RankData-Slots — wenn Kategorie
+            // Mitgliedschaft vs. Agent-Tab vs. RankData-Slots â€” wenn Kategorie
             // und Bestiarium verschiedene Gesellschaften nennen (User 2026-09-20).
             case "huntprobe":
             case "jagdsond":
@@ -1051,8 +1051,8 @@ public sealed class Plugin : IDalamudPlugin
                 break;
 #if DEBUG
             // Objekt-Sonde per Befehl: auf Strg+F5 kommt sie nur ans Ruder, wenn
-            // KEIN Fenster offen ist (der Menü-Dump gewinnt dort) - in der freien
-            // Welt mit sichtbaren HUD-Addons war sie praktisch nicht auslösbar.
+            // KEIN Fenster offen ist (der MenÃ¼-Dump gewinnt dort) - in der freien
+            // Welt mit sichtbaren HUD-Addons war sie praktisch nicht auslÃ¶sbar.
             case "objprobe":
                 _navigation.DumpNearbyObjects();
                 break;
@@ -1098,7 +1098,7 @@ public sealed class Plugin : IDalamudPlugin
                 _aozProbe.Dump();
                 break;
             // Bestienbaendiger-Jobanzeige: Rohbytes + Addon-Kandidaten + Status.
-            // Collect erst nach Messung — siehe BeastmasterGaugeProbe.
+            // Collect erst nach Messung â€” siehe BeastmasterGaugeProbe.
             case "bst":
             case "bstprobe":
                 _bstGaugeProbe.Dump();
@@ -1138,7 +1138,7 @@ public sealed class Plugin : IDalamudPlugin
     /// (UIState.IsInstanceContentUnlocked, ilspycmd 2026-08-14) instead of guessing
     /// from quest knowledge. The four entry contents and their names come from the
     /// offline sheet dump of the same day (ContentFinderCondition, ContentType
-    /// "Tiefe Gewölbe"); only the FIRST tier of each dungeon is asked, since that
+    /// "Tiefe GewÃ¶lbe"); only the FIRST tier of each dungeon is asked, since that
     /// is the one an entry requires.
     /// </summary>
     private unsafe void ProbeDeepDungeonUnlock()
@@ -1146,7 +1146,7 @@ public sealed class Plugin : IDalamudPlugin
         (uint Id, string Name)[] entries =
         {
             (60001, "Palast der Toten"),
-            (60021, "Himmelssäule"),
+            (60021, "HimmelssÃ¤ule"),
             (60031, "Eureka Orthos"),
             (60041, "Pilgers Pfad"),
         };
@@ -1163,7 +1163,7 @@ public sealed class Plugin : IDalamudPlugin
             }
             catch (Exception ex)
             {
-                Log.Error($"[DeepDungeon] Abfrage für {name} ({id}) fehlgeschlagen: {ex.Message}");
+                Log.Error($"[DeepDungeon] Abfrage fÃ¼r {name} ({id}) fehlgeschlagen: {ex.Message}");
                 continue;
             }
 
@@ -1173,7 +1173,7 @@ public sealed class Plugin : IDalamudPlugin
 
         var msg = parts.Count > 0
             ? $"Freigeschaltet: {string.Join(", ", parts)}."
-            : "Kein Tiefes Gewölbe freigeschaltet.";
+            : "Kein Tiefes GewÃ¶lbe freigeschaltet.";
         Log.Info($"[DeepDungeon] {msg}");
         _tolk.SpeakInterrupt(msg);
     }
@@ -1206,7 +1206,7 @@ public sealed class Plugin : IDalamudPlugin
     }
 
     /// <summary>
-    /// All plugin hotkeys from the config as (function, key label, VK code) â€”
+    /// All plugin hotkeys from the config as (function, key label, VK code) Ã¢â‚¬â€
     /// input for the keybind conflict check (/acc keys).
     /// </summary>
     private List<(string Function, string KeyName, int VirtualKey, bool Ctrl, bool Shift, bool Alt)> GetPluginKeys()
@@ -1215,10 +1215,10 @@ public sealed class Plugin : IDalamudPlugin
         foreach (var (function, keyName) in new[]
         {
             ("Hilfe",             _config.KeyHelp),
-            ("Nächstes Objekt",   _config.KeyNextObject),
+            ("NÃ¤chstes Objekt",   _config.KeyNextObject),
             ("Vorheriges Objekt", _config.KeyPrevObject),
             ("Kategorie",         _config.KeyCategory),
-            ("Kategorie zurück",  _config.KeyCategoryPrev),
+            ("Kategorie zurÃ¼ck",  _config.KeyCategoryPrev),
             ("Gehhilfe",          _config.KeyWalkGuide),
             ("Auto-Lauf",         _config.KeyAutoWalk),
             ("Ziel folgen",       _config.KeyFollowTarget),
@@ -1226,14 +1226,14 @@ public sealed class Plugin : IDalamudPlugin
             ("Zur Wegrichtung drehen", _config.KeyFaceWaypoint),
             ("Zu Koordinaten",    _config.KeyGotoCoords),
             ("Koordinaten kopieren", _config.KeyCopyCoords),
-            ("Menü vorlesen",  _config.KeyReadUI),
+            ("MenÃ¼ vorlesen",  _config.KeyReadUI),
             ("Sprache stopp",  _config.KeySilence),
             ("Kampfstatus",    _config.KeyCombatStatus),
             ("Ziel-HP",        _config.KeyTargetStatus),
             ("SP-Stand",       _config.KeySpStatus),
             ("Wirkungen",      _config.KeyStatusEffects),
             ("Himmelsrichtung an/aus", _config.KeyToggleHeading),
-            ("Flächenwarnung an/aus", _config.KeyToggleAoeWarning),
+            ("FlÃ¤chenwarnung an/aus", _config.KeyToggleAoeWarning),
             ("Peil-Ton an/aus", _config.KeyToggleBeacon),
             ("Sonderaktion 1", _config.KeyDutyAction1),
             ("Sonderaktion 2", _config.KeyDutyAction2),
@@ -1250,31 +1250,31 @@ public sealed class Plugin : IDalamudPlugin
             ("Chocobo-Rang",   _config.KeyChocoboRank),
             ("Mitstreiter-Fenster", _config.KeyCompanionWindow),
             ("Emote weiter",   _config.KeyEmoteNext),
-            ("Emote zurück",   _config.KeyEmotePrev),
-            ("Emote ausführen", _config.KeyEmoteDo),
+            ("Emote zurÃ¼ck",   _config.KeyEmotePrev),
+            ("Emote ausfÃ¼hren", _config.KeyEmoteDo),
             ("Bestiarium, im Rezeptbuch herstellbar", _config.KeyBestiary),
-            ("HQ-Materialien im Rezeptbuch übernehmen", _config.KeyTakeHqMaterials),
+            ("HQ-Materialien im Rezeptbuch Ã¼bernehmen", _config.KeyTakeHqMaterials),
             ("Benachrichtigung", _config.KeyNotification),
-            ("Ausrüstung",     _config.KeyReadEquipment),
-            ("Ausrüstung vergleichen", _config.KeyItemCompare),
-            ("Beste Ausrüstung", _config.KeyEquipBest),
-            ("Zufälliges Aussehen", _config.KeyRandomLook),
-            ("Skill-Menü",     _config.KeySkillMenu),
+            ("AusrÃ¼stung",     _config.KeyReadEquipment),
+            ("AusrÃ¼stung vergleichen", _config.KeyItemCompare),
+            ("Beste AusrÃ¼stung", _config.KeyEquipBest),
+            ("ZufÃ¤lliges Aussehen", _config.KeyRandomLook),
+            ("Skill-MenÃ¼",     _config.KeySkillMenu),
             ("Job-Anzeige",    _config.KeyJobGauge),
-            ("Nachlese Kategorie zurück", _config.KeyChatCatPrev),
+            ("Nachlese Kategorie zurÃ¼ck", _config.KeyChatCatPrev),
             ("Nachlese Kategorie vor",    _config.KeyChatCatNext),
-            ("Nachlese älter", _config.KeyChatReadOlder),
+            ("Nachlese Ã¤lter", _config.KeyChatReadOlder),
             ("Nachlese neuer", _config.KeyChatReadNewer),
             // [Chat-Puffer] Mit in der Konfliktpruefung, damit ein Patch, der eine
             // dieser Kombis belegt, im Keybind-Dump auffaellt statt im Spiel.
             ("Nachlese Anfang", _config.KeyChatReadOldest),
             ("Nachlese Ende",   _config.KeyChatReadNewest),
-            ("Chat-Registerkarte zurück", _config.KeyChatTabPrev),
+            ("Chat-Registerkarte zurÃ¼ck", _config.KeyChatTabPrev),
             ("Chat-Registerkarte vor",    _config.KeyChatTabNext),
-            ("Chat-Absender Menü",        _config.KeyChatPlayerMenu),
+            ("Chat-Absender MenÃ¼",        _config.KeyChatPlayerMenu),
             ("Einstellungen",   _config.KeyOptionsMenu), // [Einstellungsmenue]
             ("Plugin-Liste weiter",  _config.KeyPluginsNext),
-            ("Plugin-Liste zurück",  _config.KeyPluginsPrev),
+            ("Plugin-Liste zurÃ¼ck",  _config.KeyPluginsPrev),
             ("Plugin-Einstellungen", _config.KeyPluginsConfig),
             ("Kartenspiel Brett", _config.KeyReadBoard),
             ("Kartenspiel Hand",  _config.KeyReadHand),
@@ -1558,7 +1558,7 @@ public sealed class Plugin : IDalamudPlugin
     /// <summary>
     /// When Numpad0 (game OK) is pressed and a ContextMenu row has focus but no
     /// list selection, select that row so the game can confirm it. Never swallows
-    /// Numpad0 — quest accept and other OK actions must reach the game
+    /// Numpad0 â€” quest accept and other OK actions must reach the game
     /// (regression 2026-09-21 after swallowing).
     /// </summary>
     private void PrepareContextMenuForGameOk()
@@ -1649,11 +1649,11 @@ public sealed class Plugin : IDalamudPlugin
     }
 
     /// <summary>
-    /// Mitstreiter window key: closed → open via the game's <c>/companion</c>
-    /// text command; open → re-read the existing Buddy summary. Neither
+    /// Mitstreiter window key: closed â†’ open via the game's <c>/companion</c>
+    /// text command; open â†’ re-read the existing Buddy summary. Neither
     /// IGameGui nor ClientStructs expose an Open for AddonBuddy (PR 27 /
     /// game-api Mitstreiter); the Character-window button is mouse-only.
-    /// The spoken "opening" line is intentional — a failed command must not
+    /// The spoken "opening" line is intentional â€” a failed command must not
     /// look like a silent mod.
     /// </summary>
     private void ToggleCompanionWindow()
@@ -2203,7 +2203,7 @@ public sealed class Plugin : IDalamudPlugin
         _charaMake.Update();
 
         // Skill-Belegen: Beschreibung nach dem Namen (Dwell), solange die
-        // Skill-Liste offen ist — sonst sofort wieder raus.
+        // Skill-Liste offen ist â€” sonst sofort wieder raus.
         _hotbar.UpdateSkillDescDwell();
 
         // Sample the text-input state once for this frame. Log only on change so
@@ -2386,7 +2386,7 @@ public sealed class Plugin : IDalamudPlugin
         // HQ-Materialien im Rezeptbuch. Einfg trug bis 6.08.17 auch die
         // Filteransage des Sammel-Journals und unterschied sie ueber "ist das
         // Journal offen" - das traegt nicht, weil FF14 beide Fenster gleichzeitig
-        // offen laesst (Spielerhinweis 2026-09-12: "дак на инсерте же уже hq").
+        // offen laesst (Spielerhinweis 2026-09-12: "Ð´Ð°Ðº Ð½Ð° Ð¸Ð½ÑÐµÑ€Ñ‚Ðµ Ð¶Ðµ ÑƒÐ¶Ðµ hq").
         // Die Filter haben seit 6.08.18 gar keine Taste mehr: ihr Zustand steht
         // am Ankreuzfeld und wird dort gesprochen.
         if (IsJustPressed(_config.KeyTakeHqMaterials)) _uiReader.TakeHqMaterials();
@@ -2483,8 +2483,8 @@ public sealed class Plugin : IDalamudPlugin
         if (IsJustPressed(_config.KeyPartyMonitor))  TogglePartyMonitor();
         if (IsJustPressed(_config.KeyPartyRoster))   AnnouncePartyRoster();
         if (IsJustPressed("Escape"))                 _uiReader.HandleEscapeKey();
-        // F5 â€” UI-Dump des aktuell aktiven Addons auf den Desktop schreiben
-        // (kein Chat-Fenster nötig, funktioniert auch auf dem Titelbildschirm)
+        // F5 Ã¢â‚¬â€ UI-Dump des aktuell aktiven Addons auf den Desktop schreiben
+        // (kein Chat-Fenster nÃ¶tig, funktioniert auch auf dem Titelbildschirm)
         if (IsJustPressed(_config.KeyDumpUI))
         {
             // Dump the focused menu/window first. Only when there is NO such
@@ -2494,7 +2494,7 @@ public sealed class Plugin : IDalamudPlugin
             if (!_uiReader.DumpFocusedAddon())
                 _navigation.DumpNearbyObjects();
         }
-        // F2 â€” aktives Fenster ansagen + alle sichtbaren Fenster ins Log ([Win])
+        // F2 Ã¢â‚¬â€ aktives Fenster ansagen + alle sichtbaren Fenster ins Log ([Win])
         if (IsJustPressed(_config.KeyWhereAmI))      _uiReader.AnnounceActiveWindow();
 
         _combat.Update();
@@ -2515,7 +2515,7 @@ public sealed class Plugin : IDalamudPlugin
         // combat state on purpose: post-fight regeneration is exactly when the
         // bar refilling should be audible.
         _vitals.Update();
-        // Freilauf: Anstoß an Wesen/Kulisse und Kante (Sprung/Absturz) als Ton.
+        // Freilauf: AnstoÃŸ an Wesen/Kulisse und Kante (Sprung/Absturz) als Ton.
         _movementAudio.Update();
         // Gruppen-Heilmonitor: spricht die Gruppenposition, der Lebensstand
         // steckt in der Tonhoehe. Braucht die Frame-Zeit fuer seine
@@ -2589,7 +2589,7 @@ public sealed class Plugin : IDalamudPlugin
 
         // DC-Auswahl: Nummernblock-Navigation (4=links, 6=rechts, 2=runter, 8=hoch)
         // Nummernblock-Tasten werden vom Spiel intern verarbeitet und feuern keine
-        // AddonReceiveEvent-Hooks â€” deshalb hier abfangen und ForceDCMapRead() aufrufen.
+        // AddonReceiveEvent-Hooks Ã¢â‚¬â€ deshalb hier abfangen und ForceDCMapRead() aufrufen.
         if (_uiReader.IsDCMapOpen)
         {
             var np2 = IsJustPressed("Numpad2");
@@ -2600,7 +2600,7 @@ public sealed class Plugin : IDalamudPlugin
                 _uiReader.ForceDCMapRead();
         }
 
-        // Menü-Navigation: nur wenn ein Menü aktiv ist
+        // MenÃ¼-Navigation: nur wenn ein MenÃ¼ aktiv ist
         if (_uiReader.HasActiveMenu)
         {
             var up    = IsJustPressed("Up");
@@ -2664,7 +2664,7 @@ public sealed class Plugin : IDalamudPlugin
             }
         }
 
-        // Controller D-Pad Links/Rechts: SelectYesno Jaâ†”Nein
+        // Controller D-Pad Links/Rechts: SelectYesno JaÃ¢â€ â€Nein
         if (GamepadState.Pressed(GamepadButtons.DpadLeft)  > 0) _uiReader.NavigateGamepad(-1);
         if (GamepadState.Pressed(GamepadButtons.DpadRight) > 0) _uiReader.NavigateGamepad(+1);
     }
@@ -2699,7 +2699,7 @@ public sealed class Plugin : IDalamudPlugin
         // Map data is 2D. Everything resolved from it has a GUESSED height, and
         // the guess uses the player's own - which picks the wrong storey when
         // they stand far away and lower (measured 2026-08-07: aetheryte
-        // Herbstkürbis-See, mesh at Y -49 and Y -39 above the same spot, the
+        // HerbstkÃ¼rbis-See, mesh at Y -49 and Y -39 above the same spot, the
         // guess took -49 and only -39 was reachable). The auto-walk needs to
         // know this to tell a wrong storey from a genuinely unreachable target.
         heightIsGuess = false;

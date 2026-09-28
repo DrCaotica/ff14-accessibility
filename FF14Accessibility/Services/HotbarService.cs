@@ -9,6 +9,8 @@ using FFXIVClientStructs.FFXIV.Client.UI.Misc;
 using LuminaAction = Lumina.Excel.Sheets.Action;
 using LuminaActionTransient = Lumina.Excel.Sheets.ActionTransient;
 using LuminaBuddyAction = Lumina.Excel.Sheets.BuddyAction;
+using LuminaClassJob = Lumina.Excel.Sheets.ClassJob;
+using LuminaCraftAction = Lumina.Excel.Sheets.CraftAction;
 using LuminaEventItem = Lumina.Excel.Sheets.EventItem;
 using LuminaGeneralAction = Lumina.Excel.Sheets.GeneralAction;
 using LuminaMount = Lumina.Excel.Sheets.Mount;
@@ -206,6 +208,16 @@ public sealed class HotbarService
                 return actionName;
         }
 
+        // Handwerker-Fertigkeiten: Sheet CraftAction, Hotbar-Typ CraftAction
+        // (nicht Action/IsPlayerAction — Log 2026-09-28 Job 14 ALC: 0 Skills).
+        if (type == RaptureHotbarModule.HotbarSlotType.CraftAction &&
+            _data.GetExcelSheet<LuminaCraftAction>().TryGetRow(id, out var craft))
+        {
+            var craftName = craft.Name.ExtractText();
+            if (!string.IsNullOrWhiteSpace(craftName))
+                return craftName;
+        }
+
         // Quest items index the EventItem sheet, not Action - resolve them the
         // same deterministic way instead of relying on the display string.
         if (type == RaptureHotbarModule.HotbarSlotType.EventItem &&
@@ -308,7 +320,7 @@ public sealed class HotbarService
         AssignSource.GeneralActions, AssignSource.Mounts, AssignSource.BuddyActions,
     };
 
-    private readonly List<(uint Id, string Name, byte Level)> _skills = new();
+    private readonly List<(uint Id, string Name, byte Level, RaptureHotbarModule.HotbarSlotType SlotType)> _skills = new();
     private int _skillIndex = -1;
 
     // Description dwell for the skill assign list (same idea as ActionMenu in
@@ -767,12 +779,19 @@ public sealed class HotbarService
         _skillDescSpoken = false;
     }
 
-    /// <summary>Flattened ActionTransient tooltip text, or empty when missing.</summary>
+    /// <summary>Flattened tooltip for an Action or CraftAction id, or empty.</summary>
     private string ResolveActionDescription(uint actionId)
     {
-        if (!_data.GetExcelSheet<LuminaActionTransient>().TryGetRow(actionId, out var trans))
-            return string.Empty;
-        return FlattenDescription(trans.Description.ExtractText());
+        if (_data.GetExcelSheet<LuminaActionTransient>().TryGetRow(actionId, out var trans))
+        {
+            var fromAction = FlattenDescription(trans.Description.ExtractText());
+            if (fromAction.Length > 0) return fromAction;
+        }
+
+        if (_data.GetExcelSheet<LuminaCraftAction>().TryGetRow(actionId, out var craft))
+            return FlattenDescription(craft.Description.ExtractText());
+
+        return string.Empty;
     }
 
     /// <summary>Collapses line breaks and runs of spaces for spoken output.</summary>
@@ -926,8 +945,8 @@ public sealed class HotbarService
     /// the tooltip follows non-interrupting after a short pause.</summary>
     private void AnnounceSkill(bool interrupt = true)
     {
-        var (id, name, level) = _skills[_skillIndex];
-        var location = FindSlotLocationFor(RaptureHotbarModule.HotbarSlotType.Action, id);
+        var (id, name, level, slotType) = _skills[_skillIndex];
+        var location = FindSlotLocationFor(slotType, id);
         Say(AccessibilityStrings.SkillBrowseEntry(name, level, location, _skillIndex + 1, _skills.Count), interrupt);
         ArmSkillDescDwell(id);
     }
@@ -1069,16 +1088,16 @@ public sealed class HotbarService
             return false;
         }
 
-        var (id, name, _) = _skills[skillIndex];
+        var (id, name, _, slotType) = _skills[skillIndex];
 
-        _log.Info($"[Hotbar] Belegen: {SlotLabel(bar, slot)} (Leiste {bar + 1} Slot {slot}) <- action {id} '{name}'. " +
+        _log.Info($"[Hotbar] Belegen: {SlotLabel(bar, slot)} (Leiste {bar + 1} Slot {slot}) <- {slotType} {id} '{name}'. " +
                   $"Vorher: {DescribeSlotRaw(module, bar, slot)}, LeisteGeteilt={module->IsHotbarShared((uint)bar)}");
 
-        if (!PlaceOnSlot(module, bar, slot, RaptureHotbarModule.HotbarSlotType.Action, id, name))
+        if (!PlaceOnSlot(module, bar, slot, slotType, id, name))
             return false;
 
         // Verdict 2 frames later - announce only what the slot then really holds.
-        _framework.RunOnTick(() => VerifyAssignment(bar, slot, id, name), delayTicks: 2);
+        _framework.RunOnTick(() => VerifyAssignment(bar, slot, id, name, slotType), delayTicks: 2);
         return true;
     }
 
@@ -1502,11 +1521,23 @@ public sealed class HotbarService
 
     /// <summary>
     /// Builds the learned-skill list for the current job and level, sorted by
-    /// level like the game's Actions window. Filter (all columns ilspycmd-
-    /// verified): non-PvP Action rows whose ClassJobCategory includes the
-    /// current job, ClassJobLevel 1..current level, and - when UnlockLink is
-    /// set - the unlock quest is completed (UIState.
-    /// IsUnlockLinkUnlockedOrQuestCompleted, handles both link and quest ids).
+    /// level like the game's Actions window.
+    /// <para>
+    /// Combat jobs: non-PvP <c>Action</c> rows with <c>IsPlayerAction</c>,
+    /// ClassJobCategory match, level and UnlockLink (ilspycmd 2026-07-17).
+    /// </para>
+    /// <para>
+    /// Handwerker (DoH): synthesis abilities are NOT <c>IsPlayerAction</c>
+    /// Action rows — they live in the <c>CraftAction</c> sheet and are placed
+    /// with <c>HotbarSlotType.CraftAction</c> (log 2026-09-28 Job 14 ALC:
+    /// 0 skills, 7 Nicht-Spieler gefiltert; xivapi CraftAction „Basic
+    /// Synthesis“ / ClassJobLevel).
+    /// </para>
+    /// <para>
+    /// Sammler (DoL): still Action sheet; if the player-action filter yields
+    /// nothing, fall back to named rows whose ClassJob is this gatherer
+    /// (same level/PVP gates) so Prospect/Scharfblick etc. appear.
+    /// </para>
     /// Rebuilt on job or level change; announces and returns false when empty.
     /// </summary>
     private unsafe bool EnsureSkillList()
@@ -1534,37 +1565,64 @@ public sealed class HotbarService
         _skillsJobId = jobId;
         _skillsLevel = level;
 
+        var isDoH = false;
+        var isDoL = false;
+        if (_data.GetExcelSheet<LuminaClassJob>().TryGetRow(jobId, out var jobRow))
+        {
+            // ClassJobCategory 33 = Disciple of the Hand, 32 = Disciple of the Land
+            // (xivapi / STATUS DohDolJobIndex usage). Battle jobs use other ids.
+            var catId = jobRow.ClassJobCategory.RowId;
+            isDoH = jobRow.DohDolJobIndex >= 0 && catId == 33;
+            isDoL = jobRow.DohDolJobIndex >= 0 && catId == 32;
+        }
+
         var skippedLocked = 0;
         var skippedNotPlayer = 0;
-        foreach (var row in _data.GetExcelSheet<LuminaAction>())
+
+        if (isDoH)
         {
-            if (row.RowId == 0 || row.IsPvP) continue;
-            // ClassJobLevel 0 = not a learned-by-level player action (system rows).
-            if (row.ClassJobLevel == 0 || row.ClassJobLevel > level) continue;
-            if (row.ClassJobCategory.RowId == 0 || row.ClassJobCategory.ValueNullable is not { } cat) continue;
-            if (_gearInfo.AllowsJob(cat, jobId) != true) continue;
-            // Without this the list carried internal non-player rows that pass
-            // the job filter (five 'Ausweichen' + 'Perfekter Hieb', log
-            // 2026-07-17 12:01) - IsPlayerAction marks the real skill entries.
-            if (!row.IsPlayerAction) { skippedNotPlayer++; continue; }
-
-            var name = row.Name.ExtractText();
-            if (string.IsNullOrWhiteSpace(name)) continue;
-
-            // UnlockLink 0 = no quest gate; otherwise ask the game.
-            var unlock = row.UnlockLink.RowId;
-            if (unlock != 0 && !ui->IsUnlockLinkUnlockedOrQuestCompleted(unlock))
+            AppendCraftActions(jobId, level);
+        }
+        else
+        {
+            foreach (var row in _data.GetExcelSheet<LuminaAction>())
             {
-                skippedLocked++;
-                continue;
+                if (row.RowId == 0 || row.IsPvP) continue;
+                // ClassJobLevel 0 = not a learned-by-level player action (system rows).
+                if (row.ClassJobLevel == 0 || row.ClassJobLevel > level) continue;
+                if (row.ClassJobCategory.RowId == 0 || row.ClassJobCategory.ValueNullable is not { } cat) continue;
+                if (_gearInfo.AllowsJob(cat, jobId) != true) continue;
+                // Without this the list carried internal non-player rows that pass
+                // the job filter (five 'Ausweichen' + 'Perfekter Hieb', log
+                // 2026-07-17 12:01) - IsPlayerAction marks the real skill entries.
+                if (!row.IsPlayerAction) { skippedNotPlayer++; continue; }
+
+                var name = row.Name.ExtractText();
+                if (string.IsNullOrWhiteSpace(name)) continue;
+
+                // UnlockLink 0 = no quest gate; otherwise ask the game.
+                var unlock = row.UnlockLink.RowId;
+                if (unlock != 0 && !ui->IsUnlockLinkUnlockedOrQuestCompleted(unlock))
+                {
+                    skippedLocked++;
+                    continue;
+                }
+
+                _skills.Add((row.RowId, name, row.ClassJobLevel, RaptureHotbarModule.HotbarSlotType.Action));
             }
 
-            _skills.Add((row.RowId, name, row.ClassJobLevel));
+            // Sammler: if the combat filter emptied the list, take Action rows
+            // owned by this ClassJob (gather abilities are player-usable but
+            // some patches leave IsPlayerAction false for DoL — measured if
+            // needed; ClassJob match is the game's own ownership column).
+            if (_skills.Count == 0 && isDoL)
+                AppendGathererActions(jobId, level, ui, ref skippedLocked);
         }
 
         _skills.Sort((a, b) => a.Level != b.Level ? a.Level.CompareTo(b.Level) : a.Id.CompareTo(b.Id));
-        _log.Info($"[Hotbar] Skill-Liste gebaut: Job {jobId}, Stufe {level}, {_skills.Count} Skills, " +
-                  $"{skippedLocked} noch nicht freigeschaltet, {skippedNotPlayer} Nicht-Spieler-Actions gefiltert.");
+        _log.Info($"[Hotbar] Skill-Liste gebaut: Job {jobId}, Stufe {level}, {_skills.Count} Skills" +
+                  (isDoH ? " (CraftAction)" : isDoL ? " (Sammler)" : "") +
+                  $", {skippedLocked} noch nicht freigeschaltet, {skippedNotPlayer} Nicht-Spieler-Actions gefiltert.");
 
         if (_skills.Count == 0)
         {
@@ -1572,5 +1630,47 @@ public sealed class HotbarService
             return false;
         }
         return true;
+    }
+
+    /// <summary>
+    /// CraftAction rows for the current DoH job (ClassJob column = this job).
+    /// Sheet fields Name / ClassJob / ClassJobLevel verified via xivapi 2026-09-28.
+    /// </summary>
+    private void AppendCraftActions(byte jobId, uint level)
+    {
+        foreach (var row in _data.GetExcelSheet<LuminaCraftAction>())
+        {
+            if (row.RowId == 0) continue;
+            if (row.ClassJob.RowId != jobId) continue;
+            if (row.ClassJobLevel == 0 || row.ClassJobLevel > level) continue;
+            var name = row.Name.ExtractText();
+            if (string.IsNullOrWhiteSpace(name)) continue;
+            _skills.Add((row.RowId, name, row.ClassJobLevel, RaptureHotbarModule.HotbarSlotType.CraftAction));
+        }
+    }
+
+    /// <summary>
+    /// DoL fallback when IsPlayerAction yields an empty list: Action rows whose
+    /// ClassJob is this gatherer, with the usual level and unlock gates.
+    /// </summary>
+    private unsafe void AppendGathererActions(byte jobId, uint level, UIState* ui, ref int skippedLocked)
+    {
+        foreach (var row in _data.GetExcelSheet<LuminaAction>())
+        {
+            if (row.RowId == 0 || row.IsPvP) continue;
+            if (row.ClassJob.RowId != jobId) continue;
+            if (row.ClassJobLevel == 0 || row.ClassJobLevel > level) continue;
+            var name = row.Name.ExtractText();
+            if (string.IsNullOrWhiteSpace(name)) continue;
+
+            var unlock = row.UnlockLink.RowId;
+            if (unlock != 0 && !ui->IsUnlockLinkUnlockedOrQuestCompleted(unlock))
+            {
+                skippedLocked++;
+                continue;
+            }
+
+            _skills.Add((row.RowId, name, row.ClassJobLevel, RaptureHotbarModule.HotbarSlotType.Action));
+        }
     }
 }

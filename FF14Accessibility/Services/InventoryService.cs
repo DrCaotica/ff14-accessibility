@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using Dalamud.Game.Inventory;
@@ -172,7 +172,7 @@ public sealed class InventoryService
 
     /// <summary>
     /// How many of an item the player holds, or -1 when the inventory is not
-    /// readable yet. Counts NQ only (<c>isHq: false</c> default) — for crafting
+    /// readable yet. Counts NQ only (<c>isHq: false</c> default) â€” for crafting
     /// materials that accept either quality use <see cref="CountOfNqAndHq"/>.
     ///
     /// Uses the GAME'S OWN count (<c>InventoryManager.GetInventoryItemCount</c>),
@@ -195,7 +195,7 @@ public sealed class InventoryService
         }
         catch (Exception ex)
         {
-            _log.Error($"[Inventory] Bestandsabfrage für Item {itemId} fehlgeschlagen: {ex.Message}");
+            _log.Error($"[Inventory] Bestandsabfrage fÃ¼r Item {itemId} fehlgeschlagen: {ex.Message}");
             return -1;
         }
     }
@@ -223,7 +223,7 @@ public sealed class InventoryService
         }
         catch (Exception ex)
         {
-            _log.Error($"[Inventory] NQ+HQ-Bestand für Item {itemId} fehlgeschlagen: {ex.Message}");
+            _log.Error($"[Inventory] NQ+HQ-Bestand fÃ¼r Item {itemId} fehlgeschlagen: {ex.Message}");
             return -1;
         }
     }
@@ -254,7 +254,7 @@ public sealed class InventoryService
         // than a broken check (RaptureGearsetModule.NumGearsets).
         if (module->NumGearsets == 0)
         {
-            _log.Info("[Inventory] Keine Ausrüstungssets angelegt - keine Markierung möglich.");
+            _log.Info("[Inventory] Keine AusrÃ¼stungssets angelegt - keine Markierung mÃ¶glich.");
             return false;
         }
 
@@ -473,7 +473,7 @@ public sealed class InventoryService
         return result;
     }
 
-    // ── Neue Quest-Gegenstaende melden ───────────────────────────────
+    // â”€â”€ Neue Quest-Gegenstaende melden â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     // A quest hands the player an item that a fight depends on, and nothing
     // tells a blind player that it is usable. The loot channel already says
     // "Du hast X erhalten"; this announcement carries the part the chat does
@@ -595,6 +595,7 @@ public sealed class InventoryService
         GameInventoryType.ArmoryWrist,    GameInventoryType.ArmoryRings,
         GameInventoryType.ArmorySoulCrystal,
     };
+
 
     /// <summary>
     /// Maps item icon ids to names for everything the player currently owns.
@@ -733,7 +734,7 @@ public sealed class InventoryService
             var name = row.Name.ExtractText();
             if (!string.IsNullOrWhiteSpace(name)) map.TryAdd(row.Icon, (name, 0));
         }
-        _log.Info($"[Inventory] Icon-Sheet-Cache gebaut: {map.Count} Einträge.");
+        _log.Info($"[Inventory] Icon-Sheet-Cache gebaut: {map.Count} EintrÃ¤ge.");
         return map;
     }
 
