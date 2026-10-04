@@ -4760,6 +4760,18 @@ public sealed class UIReaderService : IDisposable
                 var comp = ((AtkComponentNode*)cur)->Component;
                 if (comp == null) return string.Empty;
 
+                // Character window: the slot's own name comes first ("Kopf, ..."),
+                // and an empty slot says so instead of falling silent - its icon is
+                // a silhouette (uint.MaxValue), which the empty check below never
+                // matched. See CharacterEquipSlot for how the slot is identified.
+                var isCharacterSlot = CharacterEquipSlot.TryDescribe(cur, FindAddonNameForNode(cur), _data, _log,
+                                                                     out var characterSlotName, out var characterEmpty);
+                if (isCharacterSlot && characterEmpty.Length > 0)
+                {
+                    _log.Info($"[CharSlot] '{characterSlotName}' leer");
+                    return $"{characterSlotName}, {characterEmpty}";
+                }
+
                 var icon = FindSlotIcon(comp);
                 if (icon == null) return string.Empty; // a real control, but not an item slot
 
@@ -4823,7 +4835,7 @@ public sealed class UIReaderService : IDisposable
                 {
                     (name, itemId) = _inventory.ResolveIconItem(icon->IconId);
                 }
-                if (string.IsNullOrEmpty(name)) return string.Empty;
+                if (string.IsNullOrEmpty(name)) return isCharacterSlot ? characterSlotName : string.Empty;
                 _lastFocusedItemId = itemId; // remembered for the description dwell
                 // Survives the deferral frames, unlike _lastFocusedItemId, which is
                 // cleared at the top of every call: a stale agent is recognised by
@@ -4834,7 +4846,9 @@ public sealed class UIReaderService : IDisposable
                 // Category and item level for EVERY item ("Baustein,
                 // Gegenstandsstufe 1") - the tooltip lines a sighted player
                 // reads while the cursor sits on the slot.
-                var basics = _gearInfo.DescribeItemBasics(itemId);
+                // Not in the Character window, though: there the slot name already
+                // says it, and "Kopf, Leinenturban, Kopf" would say it twice.
+                var basics = isCharacterSlot ? string.Empty : _gearInfo.DescribeItemBasics(itemId);
 
                 // Equipment gets level + wearability appended ("Bronzegladius,
                 // Stufe 5, tragbar") - the info a blind player needs when
@@ -4875,6 +4889,7 @@ public sealed class UIReaderService : IDisposable
 
                 _log.Info($"[Focus] Item-Slot iconId={icon->IconId} qty='{qty}' name='{name}' basics='{basics}' gear='{gear}' klassen='{owners}' set={set.Length > 0} cond='{condition}' via={conditionSource}");
                 var spoken = qty.Length > 0 ? AccessibilityStrings.ItemQuantity(qty, name) : name;
+                if (isCharacterSlot) spoken = $"{characterSlotName}, {spoken}";
                 // HQ, which a sighted player reads off the symbol drawn on the slot.
                 // Without it the two Honey stacks in the bag were the SAME sentence
                 // apart from the count (user 2026-09-05, log 00:11: "Honey, Ingredient,
