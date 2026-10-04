@@ -1,4 +1,7 @@
+using System;
+using Dalamud.Hooking;
 using Dalamud.Plugin.Services;
+using FFXIVClientStructs.FFXIV.Client.Game;
 using FFXIVClientStructs.FFXIV.Client.UI;
 using FFXIVClientStructs.FFXIV.Client.UI.Agent;
 using FFXIVClientStructs.FFXIV.Component.GUI;
@@ -69,9 +72,54 @@ public enum SlotWait
     AgentOpening,
 }
 
-public sealed unsafe class ItemSlotService
+public sealed unsafe class ItemSlotService : IDisposable
 {
     private readonly IDataManager _data;
+    private readonly IPluginLog _log;
+
+    private delegate bool OnItemHoveredDelegate(AgentItemDetail* agent, InventoryItem** outItem,
+                                                InventoryType* container, short* slot,
+                                                uint itemId, uint rowIdOrIndex, InventoryItem* item);
+
+    /// <summary>
+    /// Listens to AgentItemDetail.OnItemHovered, the game function that turns
+    /// the hovered slot into the real container, slot and item instance
+    /// (FFXIVClientStructs 2026-10). The agent's own TypeOrId/Index is a UI
+    /// numbering - 48..51 for the bag pages, 57..67 for the armoury categories
+    /// (probe 2026-10-04) - and the grid index is a SORTED display position
+    /// (see above), so neither may be read as a container slot.
+    ///
+    /// Measured with [HoverProbe] 2026-10-04 over bags and armoury: the function
+    /// runs under KEYBOARD focus too, 13-60 ms before the focus reader announces,
+    /// and named the right container every time - including two identical
+    /// trousers in the same armoury category (slots 1 and 3), told apart
+    /// correctly. Not measured in a sorted view; the reason to trust it there is
+    /// that this is what the game itself hands the tooltip.
+    /// </summary>
+    private readonly Hook<OnItemHoveredDelegate>? _hoverHook;
+
+    /// <summary>Last answer of OnItemHovered: container, slot and item id.</summary>
+    private (InventoryType Container, short Slot, uint ItemId) _lastHovered;
+
+    /// <summary>
+    /// The item instance the game last resolved on hover, or null when it is not
+    /// <paramref name="baseItemId"/> - the hook does not fire for empty slots or
+    /// for windows that do not hover a container slot, so a stale answer about
+    /// another item must never be handed out. Looked up afresh from the container
+    /// rather than kept as a pointer, because the slot may have changed since.
+    /// </summary>
+    public InventoryItem* TryGetHoveredInstance(uint baseItemId)
+    {
+        var (type, slot, itemId) = _lastHovered;
+        if (baseItemId == 0 || itemId != baseItemId || slot < 0) return null;
+
+        var inventory = InventoryManager.Instance();
+        var container = inventory == null ? null : inventory->GetInventoryContainer(type);
+        if (container == null || slot >= container->Size) return null;
+
+        var item = container->GetInventorySlot(slot);
+        return item != null && item->ItemId == baseItemId ? item : null;
+    }
 
     /// <summary>What the game adds to an icon id to draw its HQ variant. The Item
     /// sheet only ever holds the plain id, so a slot icon has to come back down by
@@ -93,7 +141,40 @@ public sealed unsafe class ItemSlotService
     /// </summary>
     public static bool IsHighQuality(uint iconId) => iconId >= HqIconOffset;
 
-    public ItemSlotService(IDataManager data) => _data = data;
+    public ItemSlotService(IDataManager data, IGameInteropProvider interop, IPluginLog log)
+    {
+        _data = data;
+        _log  = log;
+
+        // Hooking reaches into game memory: a signature that stops matching after
+        // a patch must disable this lookup only, never the plugin (TooltipService).
+        try
+        {
+            _hoverHook = interop.HookFromAddress<OnItemHoveredDelegate>(
+                AgentItemDetail.Addresses.OnItemHovered.Value, OnItemHovered);
+            _hoverHook.Enable();
+            _log.Info("[ItemSlot] Hook OnItemHovered aktiv.");
+        }
+        catch (Exception ex)
+        {
+            _log.Error($"[ItemSlot] Hook OnItemHovered fehlgeschlagen: {ex}");
+        }
+    }
+
+    private bool OnItemHovered(AgentItemDetail* agent, InventoryItem** outItem, InventoryType* container,
+                               short* slot, uint itemId, uint rowIdOrIndex, InventoryItem* item)
+    {
+        var result = _hoverHook!.Original(agent, outItem, container, slot, itemId, rowIdOrIndex, item);
+
+        // Only a successful resolve replaces the last answer; anything else keeps
+        // it, and TryGetHoveredInstance's item check discards it if it is stale.
+        var found = outItem == null ? null : *outItem;
+        if (result && found != null && container != null && slot != null)
+            _lastHovered = (*container, *slot, found->ItemId);
+        return result;
+    }
+
+    public void Dispose() => _hoverHook?.Dispose();
 
     /// <summary>
     /// The Item sheet row of the slot the given component belongs to, or 0 when

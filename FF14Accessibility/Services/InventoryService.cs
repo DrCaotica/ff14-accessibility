@@ -306,47 +306,42 @@ public sealed class InventoryService
     }
 
     /// <summary>
-    /// Durability of the ONE copy of this item the player owns, in percent, from
-    /// the game's own value on the item instance - the fallback for slots whose
-    /// tooltip window the game does not open (UIReaderService.ReadTooltipCondition
-    /// is the primary source, and this only runs when that came back empty).
+    /// The ONE copy of this item the player owns, so its condition and spiritbond
+    /// can be read (ItemWearText) - the fallback for slots the game did not
+    /// resolve on hover (ItemSlotService.TryGetHoveredInstance is the primary
+    /// source, and this only runs when that came back empty).
     ///
     /// Equipment only: everything else (materials, crystals) has no condition.
     ///
-    /// Says NOTHING when more than one copy exists. Condition lives on the
-    /// individual instance, and the item id alone cannot say which of the two the
-    /// cursor is on. Silence is the only honest answer there: this is the number a
-    /// player decides on (repair now or not), and a plausible wrong one is worse
-    /// than none - the same reasoning that made the icon lookup a fallback
-    /// everywhere else.
+    /// Null when more than one copy exists. Condition lives on the individual
+    /// instance, and the item id alone cannot say which of the two the cursor is
+    /// on. Silence is the only honest answer there: this is the number a player
+    /// decides on (repair now or not), and a plausible wrong one is worse than
+    /// none - the same reasoning that made the icon lookup a fallback everywhere
+    /// else.
     /// </summary>
-    public unsafe string DescribeOwnedCondition(uint baseItemId, bool isHq)
+    public unsafe InventoryItem* FindSingleOwnedInstance(uint baseItemId, bool isHq)
     {
-        if (baseItemId == 0) return string.Empty;
+        if (baseItemId == 0) return null;
 
         // The same early-out IsAnyCopyRegisteredToGearset uses: the sheet tells us
         // whether this can carry a condition at all, before any container scan.
-        if (!_data.GetExcelSheet<LuminaItem>().TryGetRow(baseItemId, out var row)) return string.Empty;
-        if (row.EquipSlotCategory.RowId == 0) return string.Empty;
+        if (!_data.GetExcelSheet<LuminaItem>().TryGetRow(baseItemId, out var row)) return null;
+        if (row.EquipSlotCategory.RowId == 0) return null;
 
-        var found   = 0;
-        byte percent = 0;
-
+        InventoryItem* single = null;
         foreach (var container in BagPages.Concat(GearContainers))
             foreach (var item in _inventory.GetInventoryItems(container))
             {
                 if (item.IsEmpty || item.BaseItemId != baseItemId || item.IsHq != isHq) continue;
                 if (item.Address == 0) continue;
 
-                if (++found > 1) return string.Empty; // two copies - cannot tell which one
-                // The game's own percentage, not a re-derived one: the max
-                // condition it is relative to lives in the item sheet's level rows.
-                percent = ((InventoryItem*)item.Address)->GetConditionPercentage();
+                if (single != null) return null; // two copies - cannot tell which one
+                single = (InventoryItem*)item.Address;
             }
 
-        if (found != 1) return string.Empty;
-        _log.Info($"[Inventory] Zustand aus dem Bestand: item={baseItemId} hq={isHq} -> {percent}%");
-        return AccessibilityStrings.ItemCondition(percent);
+        if (single != null) _log.Info($"[Inventory] Einziges Exemplar im Bestand: item={baseItemId} hq={isHq}");
+        return single;
     }
 
     /// <summary>

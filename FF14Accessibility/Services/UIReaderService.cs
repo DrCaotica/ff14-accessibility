@@ -3589,6 +3589,12 @@ public sealed class UIReaderService : IDisposable
             // resolver (which would announce "Leer").
             text = configRow;
         }
+        else if (ArmouryTabText.TryDescribe(node, FindAddonNameForNode(node), _data, out var armouryTab))
+        {
+            // Armoury category buttons: icon-only, they were silent under focus
+            // and sounded like empty slots that failed to speak (user 2026-10-04).
+            text = AccessibilityStrings.CategoryLabel(armouryTab);
+        }
         else if (TryReadMountNoteBookFocusRow(node, out var mountRow))
         {
             // Mount guide (Reittier-Verzeichnis): the tiles are icon-only
@@ -4866,34 +4872,32 @@ public sealed class UIReaderService : IDisposable
                 // Prepend the stack count so the user hears "10 mal Eichenholz".
                 var qty = ReadIconQuantity(icon);
 
-                // Durability - the one line of the tooltip that cannot be worked
-                // out from anything else on the slot (user 2026-09-12, armoury
-                // chest). The game's own tooltip text comes first; where the game
-                // does not open that window (measured 2026-09-05: it opens on
-                // hover only, never on keyboard focus), the single owned copy of
-                // the item answers instead - and stays silent when there are
-                // several, because the item id cannot say which copy the cursor
-                // is on. Both sources read the game's value; neither recomputes it.
+                // Condition and spiritbond - the lines of the tooltip that cannot
+                // be worked out from anything else on the slot (user 2026-09-12,
+                // armoury chest; 2026-10-04: a bare percentage did not say WHICH of
+                // the two it was). Always read from the item INSTANCE, never from
+                // the tooltip text, which trails the cursor - see ItemWearText.
+                // The instance comes from the worn slot in the Character window,
+                // otherwise from the game's own hover resolve; failing both, from
+                // the single owned copy - and stays silent when there are several,
+                // because the item id cannot say which copy the cursor is on.
                 var condition       = string.Empty;
                 var conditionSource = "-";
                 if (isCharacterSlot)
                 {
-                    // Character window: the worn instance answers, with spiritbond
-                    // alongside - see CharacterEquipSlot.DescribeWear for why the
-                    // tooltip is not trusted there.
                     condition       = characterWear;
                     conditionSource = "worn";
                 }
                 else if (agentItemId != 0)
                 {
-                    condition       = ReadTooltipCondition();
-                    conditionSource = "tooltip";
-                    if (condition.Length == 0)
+                    var instance = _itemSlots.TryGetHoveredInstance(itemId);
+                    conditionSource = "hover";
+                    if (instance == null)
                     {
-                        condition = _inventory.DescribeOwnedCondition(
-                            itemId, ItemSlotService.IsHighQuality(icon->IconId));
-                        conditionSource = condition.Length > 0 ? "inventory" : "none";
+                        instance = _inventory.FindSingleOwnedInstance(itemId, ItemSlotService.IsHighQuality(icon->IconId));
+                        conditionSource = instance != null ? "inventory" : "none";
                     }
+                    condition = ItemWearText.Describe(instance, _data, _log);
                 }
 
                 _log.Info($"[Focus] Item-Slot iconId={icon->IconId} qty='{qty}' name='{name}' basics='{basics}' gear='{gear}' klassen='{owners}' set={set.Length > 0} cond='{condition}' via={conditionSource}");
@@ -11610,33 +11614,6 @@ public sealed class UIReaderService : IDisposable
         _log.Info($"[Item] Tooltip: {parts.Count} Teile - {msg}");
         _tolk.SpeakInterrupt(msg);
         return true;
-    }
-
-    /// <summary>
-    /// The condition (durability) line of the open item tooltip, in the game's
-    /// own words - "Zustand 87 Prozent" / "Condition: 87%". Read from the tooltip
-    /// node the game fills (AddonItemDetail.ConditionValue), never derived: the
-    /// percentage is relative to a maximum that lives in the item sheet, and the
-    /// game has already done that arithmetic for the line it draws.
-    ///
-    /// The caller only asks while the item agent names THIS slot's item, so a
-    /// tooltip about some other item cannot contribute a number here.
-    ///
-    /// Empty when the tooltip is closed, when the item has no condition line at
-    /// all (materials, crystals), or while that line is hidden - the caller then
-    /// falls back to the owned item instance (InventoryService).
-    /// </summary>
-    private unsafe string ReadTooltipCondition()
-    {
-        var ptr = _gameGui.GetAddonByName("ItemDetail");
-        if (ptr.IsNull) return string.Empty;
-
-        var addon = (AddonItemDetail*)(nint)ptr;
-        if (!addon->IsVisible) return string.Empty;
-        if (addon->ConditionLine == null || !addon->ConditionLine->IsVisible()) return string.Empty;
-        if (addon->ConditionValue == null) return string.Empty;
-
-        return AtkText.ReadClean(addon->ConditionValue).Trim();
     }
 
     /// <summary>

@@ -393,7 +393,7 @@ public sealed class Plugin : IDalamudPlugin
         _inventoryReader = new InventoryService(GameInventory, DataManager, ClientState, _config, _tolk, Log);
         // Braucht nur das Item-Sheet: die Antwort kommt aus dem Detail-Agenten
         // des Spiels, den Fokus-Knoten holt er sich selbst (siehe ItemSlotService).
-        _itemSlots       = new ItemSlotService(DataManager);
+        _itemSlots       = new ItemSlotService(DataManager, Interop, Log);
         _hotbar       = new HotbarService(DataManager, ClientState, Framework, _gearInfo, _keybinds, _inventoryReader, _tolk, Log);
         _lootRolls    = new LootRollService(DataManager, ClientState, GameGui, _config, _gearInfo, _tolk, Log);
         _equipment    = new EquipmentService(GameInventory, _inventoryReader, DataManager, _gearInfo, _tolk, Log);
@@ -3356,6 +3356,7 @@ public sealed class Plugin : IDalamudPlugin
         _updates.Dispose();
         _shutdown.Dispose();
         _tooltips.Dispose();
+        _itemSlots.Dispose();
         _toasts.Dispose();
         _chatReader.Dispose();
         _legacyChatReader.Dispose();
