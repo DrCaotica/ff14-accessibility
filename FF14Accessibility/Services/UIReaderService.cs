@@ -3589,11 +3589,14 @@ public sealed class UIReaderService : IDisposable
             // resolver (which would announce "Leer").
             text = configRow;
         }
-        else if (ArmouryTabText.TryDescribe(node, FindAddonNameForNode(node), _data, out var armouryTab))
+        else if (ArmouryTabText.TryDescribe(node, FindAddonNameForNode(node), _data, out var armouryTab, out var armouryCount))
         {
             // Armoury category buttons: icon-only, they were silent under focus
             // and sounded like empty slots that failed to speak (user 2026-10-04).
-            text = AccessibilityStrings.CategoryLabel(armouryTab);
+            // The item count is the number drawn on the button.
+            text = armouryCount.Length > 0
+                ? AccessibilityStrings.CategoryLabelWithCount(armouryTab, armouryCount)
+                : AccessibilityStrings.CategoryLabel(armouryTab);
         }
         else if (TryReadMountNoteBookFocusRow(node, out var mountRow))
         {

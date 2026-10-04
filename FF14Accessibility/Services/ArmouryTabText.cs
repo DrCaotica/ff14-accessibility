@@ -49,13 +49,22 @@ internal static unsafe class ArmouryTabText
         1385, // 11 Jobkristall
     };
 
+    /// <summary>Text node inside each button that shows how many items the
+    /// category holds (dump 2026-10-04: id=3, "7" on Beine while the armoury's
+    /// legs container held exactly 7 pieces in the probe run).</summary>
+    private const uint CountTextNodeId = 3;
+
     /// <summary>
     /// The category name of the armoury button the focus sits on, or false when
     /// the focus is anywhere else.
     /// </summary>
-    public static bool TryDescribe(AtkResNode* focus, string addonName, IDataManager data, out string name)
+    /// <param name="count">The item count the button shows, as the game wrote
+    /// it; "" when the button shows none.</param>
+    public static bool TryDescribe(AtkResNode* focus, string addonName, IDataManager data,
+                                   out string name, out string count)
     {
-        name = string.Empty;
+        name  = string.Empty;
+        count = string.Empty;
         if (focus == null || addonName != AddonName) return false;
 
         // The focus sits on the button's collision child; the button is the
@@ -73,6 +82,13 @@ internal static unsafe class ArmouryTabText
             name = data.GetExcelSheet<LuminaAddon>().TryGetRow(TabNameRows[tab], out var row)
                 ? TolkService.Sanitize(row.Text.ExtractText()).Trim()
                 : string.Empty;
+
+            // The number a sighted player reads next to the icon - read, not
+            // counted, so it says exactly what the button says.
+            var countNode = comp->GetTextNodeById(CountTextNodeId);
+            if (countNode != null && ((AtkResNode*)countNode)->IsVisible())
+                count = AtkText.Read(countNode).Trim();
+
             return name.Length > 0;
         }
         return false;

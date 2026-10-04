@@ -44,6 +44,11 @@ public static partial class AccessibilityStrings
     public static string CategoryLabel(string name) =>
         IsGerman ? $"Kategorie {name}." : $"Category {name}.";
 
+    /// <summary>A category button that shows how many items it holds, e.g. the
+    /// armoury's "Rumpf" with its 8: "Kategorie Rumpf, 8."</summary>
+    public static string CategoryLabelWithCount(string name, string count) =>
+        IsGerman ? $"Kategorie {name}, {count}." : $"Category {name}, {count}.";
+
     /// <summary>ItemSearch: Enter on a category started a market search.</summary>
     public static string MarketSearching(string category) =>
         IsGerman ? $"Suche: {category}." : $"Searching: {category}.";
