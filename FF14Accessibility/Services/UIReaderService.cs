@@ -4765,7 +4765,8 @@ public sealed class UIReaderService : IDisposable
                 // a silhouette (uint.MaxValue), which the empty check below never
                 // matched. See CharacterEquipSlot for how the slot is identified.
                 var isCharacterSlot = CharacterEquipSlot.TryDescribe(cur, FindAddonNameForNode(cur), _data, _log,
-                                                                     out var characterSlotName, out var characterEmpty);
+                                                                     out var characterSlotName, out var characterEmpty,
+                                                                     out var characterWear);
                 if (isCharacterSlot && characterEmpty.Length > 0)
                 {
                     _log.Info($"[CharSlot] '{characterSlotName}' leer");
@@ -4875,7 +4876,15 @@ public sealed class UIReaderService : IDisposable
                 // is on. Both sources read the game's value; neither recomputes it.
                 var condition       = string.Empty;
                 var conditionSource = "-";
-                if (agentItemId != 0)
+                if (isCharacterSlot)
+                {
+                    // Character window: the worn instance answers, with spiritbond
+                    // alongside - see CharacterEquipSlot.DescribeWear for why the
+                    // tooltip is not trusted there.
+                    condition       = characterWear;
+                    conditionSource = "worn";
+                }
+                else if (agentItemId != 0)
                 {
                     condition       = ReadTooltipCondition();
                     conditionSource = "tooltip";
