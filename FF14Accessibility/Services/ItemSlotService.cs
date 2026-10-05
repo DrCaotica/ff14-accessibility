@@ -93,8 +93,15 @@ public sealed unsafe class ItemSlotService : IDisposable
     /// runs under KEYBOARD focus too, 13-60 ms before the focus reader announces,
     /// and named the right container every time - including two identical
     /// trousers in the same armoury category (slots 1 and 3), told apart
-    /// correctly. Not measured in a sorted view; the reason to trust it there is
-    /// that this is what the game itself hands the tooltip.
+    /// correctly.
+    ///
+    /// Also right in a SORTED view - measured with [SortProbe] 2026-10-05: after
+    /// "/sort def Beine ggstufe abs" + "/sort los Beine" the legs category showed
+    /// 11 of its 35 positions away from their container slot
+    /// (ItemOrderModule.ArmouryLegsSorter). Over 12 focus changes the hook's slot
+    /// equalled the sorter entry at the display index every time (display 3 ->
+    /// slot 10, display 9 -> slot 0, ...), and two identical loincloths at display
+    /// 2 and 3 (slots 7 and 10) announced their own 100 %/0 % and 89 %/25 %.
     /// </summary>
     private readonly Hook<OnItemHoveredDelegate>? _hoverHook;
 
