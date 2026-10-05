@@ -3172,3 +3172,23 @@ Offline-Zählung sqpack EN: +~186 NPCs nur über Indirection, ~666 schon direkt.
 - Kategorie „Beine“ wird angenommen (getestet), steht aber nicht in `TextCommandParam`.
 - Sortieren ändert nur die Anzeige-Reihenfolge, nichts wird abgelegt. Die alte
   Reihenfolge kommt nicht zurück.
+
+## Händler (Gil-Laden, Addon `Shop`): Menge und Gegenstandsart (gemessen 2026-10-05)
+
+- Jede Kaufzeile (ListItemRenderer in Liste id=16) hat: Text id=3 Name,
+  `NumericInput` id=4 Menge (Standard 1, max 99), Text id=6 Preis, Text id=8
+  eine zweite Zahl (vermutlich Bestand, NICHT geprüft). Die Rückkauf-Liste
+  (id=17) hat kein Mengenfeld.
+- Der Preis in der Zeile ist der GESAMTPREIS für die eingestellte Menge
+  (Menge 4 bei 28 Gil → „112, Heiltrank“).
+- Tasten (Log 19:45–19:51): NUM4 von der Zeile → Mengenfeld (Fokus id=5,
+  `IsActive` false); NUM0 → Bearbeiten (Fokus id=9, `IsActive` true); NUM0
+  erneut → Bearbeiten beenden, Menge bleibt in der Zeile. NUM6 zurück auf die
+  Zeile, NUM0 dort → SelectYesno „3 Heiltränke für 84 Gil kaufen?“.
+- Beim Bearbeiten: `CurrentDigitMultiplier` 1 = Einer, 10 = Zehner. Der Text
+  ist im Zehner-Modus zweistellig („04“), darum `Value` lesen, nicht den Text.
+  Zehnerschritte laufen um: unter 1 → 99, über 99 → 1.
+- Gegenstandsart = `Item.ItemUICategory.Name`, für Rüstung der Slot
+  („Kopf“, „Rumpf“, „Hände“, „Beine“, „Füße“, „Ring“ …). Umgesetzt in
+  `GearInfoService.DescribeByName`; Mengenfeld/Hinweise in `UIReaderService`
+  (`TryReadShopQuantityFocus`, `AppendShopRowQuantity`).

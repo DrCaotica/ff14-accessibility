@@ -161,14 +161,24 @@ public sealed class GearInfoService
     /// <summary>
     /// Gear info for a UI text that IS an equipment name (a shop row lists
     /// only name and price). "" when the text is no known equipment name.
+    ///
+    /// Leads with the item category, which for armour is the slot the piece
+    /// goes on ("Kopf", "Rumpf", "Hände"): a sighted player reads it off the
+    /// tooltip, and in a shop list it is the one thing the name often does not
+    /// give away (user request 2026-10-05). Same source and same order as the
+    /// inventory slots (<see cref="DescribeItemBasics"/>, then
+    /// <see cref="DescribeGear"/>).
     /// </summary>
     public string DescribeByName(string text)
     {
         if (string.IsNullOrWhiteSpace(text)) return string.Empty;
         _gearNames ??= BuildGearNameCache();
-        return _gearNames.TryGetValue(text.Trim().ToLowerInvariant(), out var id)
-            ? DescribeGear(id)
-            : string.Empty;
+        if (!_gearNames.TryGetValue(text.Trim().ToLowerInvariant(), out var id)) return string.Empty;
+
+        var basics = DescribeItemBasics(id);
+        var gear   = DescribeGear(id);
+        if (basics.Length == 0) return gear;
+        return gear.Length > 0 ? $"{basics}, {gear}" : basics;
     }
 
     // ── Tragbarkeits-Prüfung ──

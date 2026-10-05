@@ -1931,6 +1931,33 @@ public static partial class AccessibilityStrings
     public static string ShopOwned(int owned) =>
         IsGerman ? $", du hast {owned}" : $", you have {owned}";
 
+    /// <summary>Spoken once per opened gil shop, after the first row: the
+    /// quantity field sits to the LEFT of the row and nothing on the row itself
+    /// says it exists (user 2026-10-05).</summary>
+    public static string ShopQuantityHint =>
+        IsGerman ? "Zum Ändern der Menge nach links." : "To change the quantity, move left.";
+
+    /// <summary>Appended to a shop row whose quantity field holds more than 1:
+    /// the row's price is then the TOTAL for that many (measured 2026-10-05:
+    /// "112, Heiltrank" at quantity 4 and 28 Gil each).</summary>
+    public static string ShopRowQuantity(int value) =>
+        IsGerman ? $", Menge {value}" : $", quantity {value}";
+
+    /// <summary>The quantity field of a shop row while it is NOT being edited,
+    /// with the key that starts editing (NUM0 = confirm, game-api.md "Menüs").</summary>
+    public static string ShopQuantityField(int value) =>
+        IsGerman ? $"Menge {value}, zum Ändern Numpad 0" : $"Quantity {value}, Numpad 0 to change";
+
+    /// <summary>The quantity field while editing: the value, then which digit
+    /// the arrows step - ones or tens. <paramref name="step"/> is the field's own
+    /// digit multiplier; any other value names no digit rather than guess one.</summary>
+    public static string ShopQuantityEditing(int value, int step) => step switch
+    {
+        1  => IsGerman ? $"{value}, Einer"  : $"{value}, ones",
+        10 => IsGerman ? $"{value}, Zehner" : $"{value}, tens",
+        _  => value.ToString(),
+    };
+
     // ── Inventar-Reiter (Inventory) ──────────────────────────────────
     /// <summary>The active inventory bag tab, announced on switch. The label is
     /// the game's own tab number ("1".."4").</summary>

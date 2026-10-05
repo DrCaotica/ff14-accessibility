@@ -693,6 +693,9 @@ public sealed class UIReaderService : IDisposable
         // die Auszahlungstabelle (Log 2026-09-26).
         _addonLifecycle.RegisterListener(AddonEvent.PostSetup, "LotteryDaily", OnLotteryDailyOpen);
 
+        // Laden: Hinweis auf das Mengenfeld, einmal je geoeffnetem Fenster.
+        _addonLifecycle.RegisterListener(AddonEvent.PostSetup, "Shop", OnShopOpen);
+
         // -- SelectString / SelectIconString ----------------------
         foreach (var name in SelectStringAddons)
             _addonLifecycle.RegisterListener(AddonEvent.PostSetup, name, OnSelectStringOpen);
@@ -3565,6 +3568,17 @@ public sealed class UIReaderService : IDisposable
             // Zellen/Reihen ueber AddonLotteryDaily.GameBoard / LaneSelector.
             text = miniLotteryRow;
         }
+        else if (TryReadShopQuantityFocus(node, out var shopQuantity))
+        {
+            // Mengenfeld einer Laden-Zeile: der allgemeine Pfad sagte nur die
+            // nackte Ziffer ("4", im Zehner-Modus "04") - ohne zu sagen, WAS die
+            // Zahl ist und welche Stelle sich gerade aendert (User 2026-10-05).
+            // Das Feld liegt IN der Zeile, die oben schon als Ware verknuepft
+            // wurde - ohne das Abschalten kaeme hinter der Menge noch die
+            // Gegenstandsbeschreibung, bei jedem Besuch des Feldes.
+            text = shopQuantity;
+            _shopRowItemActive = false;
+        }
         else if (TryReadCurrencyFocusRow(node, out var currencyRow))
         {
             // Vermoegen: die Zeile sagt jetzt, WELCHE Waehrung sie ist. Vor dem
@@ -3967,6 +3981,9 @@ public sealed class UIReaderService : IDisposable
             // weil in einem Tauschfenster der Preis die Entscheidung traegt und
             // die Werte nur die Zugabe sind.
             text = AppendShopPrice(text);
+            // Die Menge direkt hinter Preis und Name - vor der Gear-Info, weil der
+            // Preis der Zeile dann fuer GENAU so viele Stueck gilt.
+            text = AppendShopRowQuantity(node, text);
             // Item-Slot-Texte tragen die Gear-Info schon (ResolveFocusedItemName);
             // rohe Fokus-Texte (Laden-Zeilen) bekommen sie hier angehaengt.
             if (string.IsNullOrEmpty(_lastFocusedItemName)) text = AppendShopGearInfo(text);
@@ -3982,7 +3999,112 @@ public sealed class UIReaderService : IDisposable
             // from ContextMenu "Anlegen" restored this slot and wiped the
             // reason — log 2026-09-28 09:16:00 / 09:19:58).
             _tolk.SpeakFocusInterrupt(text, (nint)node);
+            MaybeSpeakShopQuantityHint(node);
         }
+    }
+
+    // -- Laden: Mengenfeld ----------------------------------------------------
+
+    /// <summary>Set when a gil shop window opens, cleared once its quantity hint
+    /// has been spoken - so the hint comes once per visit, not on every row.</summary>
+    private bool _shopQuantityHintPending;
+
+    private void OnShopOpen(AddonEvent type, AddonArgs args) => _shopQuantityHintPending = true;
+
+    /// <summary>
+    /// After the first row of a freshly opened shop: where the quantity field is.
+    /// Queued, not interrupting, so the row itself is heard first. Only when the
+    /// focused row really HAS a quantity field - the buyback list of the same
+    /// window does not.
+    /// </summary>
+    private unsafe void MaybeSpeakShopQuantityHint(AtkResNode* node)
+    {
+        if (!_shopQuantityHintPending) return;
+        var row = FindShopRow(node);
+        if (row == null || FindNumericInput(((AtkComponentNode*)row)->Component) == null) return;
+        if (FindAddonNameForNode(node) != "Shop") return;
+
+        _shopQuantityHintPending = false;
+        _tolk.Speak(AccessibilityStrings.ShopQuantityHint);
+    }
+
+    /// <summary>
+    /// The quantity field of a gil shop row (Shop, dump 2026-10-05: a
+    /// NumericInput, node id=4, in every buy row, default 1, max 99).
+    ///
+    /// Measured with [ShopQtyProbe] 2026-10-05 19:45: NUM4 from the row puts the
+    /// focus on the field (id=5 inside the NumericInput, IsActive false); NUM0
+    /// starts editing (focus id=9, IsActive true) and NUM0 again ends it. The
+    /// chosen amount stays in the field, and confirming on the ROW then asks for
+    /// exactly that many ("3 Heiltränke für 84 Gil kaufen?", 19:51:40).
+    /// Value and editing state are read from the component, never from its
+    /// text, which is zero-padded while the tens digit is being edited ("04").
+    /// CurrentDigitMultiplier is 1 on the ones and 10 on the tens digit
+    /// (log 2026-10-05 20:01:35-37, switching back and forth while editing).
+    /// </summary>
+    private unsafe bool TryReadShopQuantityFocus(AtkResNode* node, out string text)
+    {
+        text = string.Empty;
+        if (node == null) return false;
+
+        AtkComponentNumericInput* input = null;
+        var cur = node->ParentNode;
+        for (var up = 0; up < 2 && cur != null && input == null; up++, cur = cur->ParentNode)
+        {
+            if ((int)cur->Type < 1000) continue;
+            var comp = ((AtkComponentNode*)cur)->Component;
+            if (comp != null && comp->GetComponentType() == ComponentType.NumericInput)
+                input = (AtkComponentNumericInput*)comp;
+        }
+        if (input == null || FindShopRow(node) == null || FindAddonNameForNode(node) != "Shop") return false;
+
+        text = input->IsActive
+            ? AccessibilityStrings.ShopQuantityEditing(input->Value, input->CurrentDigitMultiplier)
+            : AccessibilityStrings.ShopQuantityField(input->Value);
+
+        var raw = $"value={input->Value} aktiv={input->IsActive} stelle={input->CurrentDigitMultiplier}";
+        if (raw != _lastShopQuantityRaw)
+        {
+            _lastShopQuantityRaw = raw;
+            _log.Info($"[Shop] Mengenfeld {raw}");
+        }
+        return true;
+    }
+
+    private string _lastShopQuantityRaw = string.Empty;
+
+    /// <summary>
+    /// Appends ", Menge 4" to a gil shop row whose quantity field holds more
+    /// than 1. A sighted player sees the number next to the price; without it
+    /// the row said only "112, Heiltrank" - the TOTAL for 4, which reads like
+    /// the price of one (user 2026-10-05). At 1 it stays silent: that is the
+    /// default on every row, and saying it on each would only be noise.
+    /// </summary>
+    private unsafe string AppendShopRowQuantity(AtkResNode* node, string text)
+    {
+        // Set only for a row linked to an item, and cleared on the quantity field
+        // itself, which already says its number.
+        if (!_shopRowItemActive || string.IsNullOrEmpty(text)) return text;
+
+        var row = FindShopRow(node);
+        if (row == null) return text;
+        var input = FindNumericInput(((AtkComponentNode*)row)->Component);
+        if (input == null || input->Value <= 1 || FindAddonNameForNode(node) != "Shop") return text;
+
+        return text + AccessibilityStrings.ShopRowQuantity(input->Value);
+    }
+
+    /// <summary>The first NumericInput among a component's direct children, or null.</summary>
+    private static unsafe AtkComponentNumericInput* FindNumericInput(AtkComponentBase* comp)
+    {
+        for (var i = 0; comp != null && i < comp->UldManager.NodeListCount; i++)
+        {
+            var child = comp->UldManager.NodeList[i];
+            if (child == null || (int)child->Type < 1000) continue;
+            var c = ((AtkComponentNode*)child)->Component;
+            if (c != null && c->GetComponentType() == ComponentType.NumericInput) return (AtkComponentNumericInput*)c;
+        }
+        return null;
     }
 
     // -- Charaktererstellung: Auswahl folgt dem Fokus (V4.93) ----------------
@@ -15426,6 +15548,7 @@ public sealed class UIReaderService : IDisposable
         _addonLifecycle.UnregisterListener(AddonEvent.PostUpdate, "Buddy", OnBuddyUpdate);
         _addonLifecycle.UnregisterListener(AddonEvent.PostUpdate, "BuddySkill", OnBuddySkillUpdate);
         _addonLifecycle.UnregisterListener(AddonEvent.PostSetup, "LotteryDaily", OnLotteryDailyOpen);
+        _addonLifecycle.UnregisterListener(AddonEvent.PostSetup, "Shop", OnShopOpen);
         _addonLifecycle.UnregisterListener(AddonEvent.PostUpdate, "Character", OnCharacterUpdate);
         _addonLifecycle.UnregisterListener(AddonEvent.PostUpdate, "MountNoteBook", OnMountNoteBookUpdate);
         _addonLifecycle.UnregisterListener(AddonEvent.PostUpdate, "JournalDetail", OnQuestWindowUpdate);
