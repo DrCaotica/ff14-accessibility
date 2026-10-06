@@ -2049,6 +2049,12 @@ AtkValues, nicht in den Textknoten.
   „Slot: Body", „Gathering +32", „Lv. 27"). Sie werden woertlich weitergereicht.
 - FALLE: `EquippableBy` liefert bei Waffen die ABKUERZUNGSLISTE („ARC BRD"), die ein
   Screenreader buchstabiert. Dafuer gibt es `GearInfoService.DescribeOwnClasses`.
+- FALLE (offline sqpack 2026-10-06): Das `ClassJob`-Sheet hat 46 Zeilen. 1-43 sind
+  echte Klassen (bis BST), **44 und 45 sind leer** (kein Name in de/en, keine
+  Abkuerzung, Parent 0, JobIndex 0) — aber `ExpArrayIndex = 0`, also der Index von
+  Faustkaempfer/Moench. Wer Zeilen nur ueber `ClassJobLevels[ExpArrayIndex] > 0`
+  als "eigene Klasse" erkennt, haelt sie bei jedem Moench fuer besessen (Log:
+  „Keine Job-Spalte '' (Job 44/45)"). Deshalb Zeilen ohne Namen vorher ueberspringen.
 - **Fuer die BONI (Staerke, Geschick, Kritische Trefferwertung …) gibt es KEINEN
   Unterschied im Fenster.** Jeder Block fuehrt nur seine EIGENE Liste als fertige
   Zeichenketten in `BonusStats[0..7]`, Form `"<Name> +<N>"`, Name auch mehrwortig

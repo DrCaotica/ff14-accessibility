@@ -248,13 +248,20 @@ public sealed class GearInfoService
         foreach (var job in _data.GetExcelSheet<ClassJob>())
         {
             if (job.RowId == 0) continue;                       // "Abenteurer" is no class
+
+            // Unnamed rows are placeholders, not classes: rows 44 and 45 carry no
+            // name and no abbreviation, yet ExpArrayIndex 0 - the pugilist/monk
+            // level (offline sqpack 2026-10-06). Checked before the level lookup,
+            // or a monk "owns" them and AllowsJob warns about a missing column.
+            var name = job.Name.ExtractText().Trim();
+            if (name.Length == 0) continue;
+
             var index = job.ExpArrayIndex;
             if (index < 0 || index >= levels.Length) continue;
             if (levels[index] <= 0) continue;                   // not one of the player's
             if (AllowsJob(cat, (byte)job.RowId) != true) continue;
 
-            var name = job.Name.ExtractText().Trim();
-            if (name.Length > 0) names.Add(name);
+            names.Add(name);
         }
 
         if (names.Count == 0) return string.Empty;
