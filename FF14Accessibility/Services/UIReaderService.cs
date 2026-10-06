@@ -628,6 +628,10 @@ public sealed class UIReaderService : IDisposable
         // switch (user 2026-07-25: tabs were silent).
         _addonLifecycle.RegisterListener(AddonEvent.PostUpdate, "GrandCompanyExchange", OnGrandCompanyUpdate);
 
+        // Gil-Händler: Wechsel Kaufen/Zurückkaufen ansagen.
+        _addonLifecycle.RegisterListener(AddonEvent.PostSetup,  "Shop", OnShopSetup);
+        _addonLifecycle.RegisterListener(AddonEvent.PostUpdate, "Shop", OnShopUpdate);
+
         // Rang der staatlichen Gesellschaft (aus Charakter-Profil): Gesellschaft
         // + aktueller Rang. Radios sind nur Icons (Dump 2026-09-20).
         _addonLifecycle.RegisterListener(AddonEvent.PostUpdate, "GrandCompanyRank", OnGrandCompanyRankUpdate);
@@ -2331,6 +2335,95 @@ public sealed class UIReaderService : IDisposable
         else          _tolk.Speak(AccessibilityStrings.CategoryLabel(category));
     }
 
+    // -- Shop (Gil-Händler): Reiter Kaufen / Zurückkaufen -------------
+
+    // Shop tab the player last heard about, "" until the window has been seen
+    // after opening. The tab a visit starts on is recorded silently - the
+    // window title was just spoken - and only a switch is announced.
+    private string _lastShopTab = string.Empty;
+
+    private void OnShopSetup(AddonEvent type, AddonArgs args) => _lastShopTab = string.Empty;
+
+    /// <summary>
+    /// Gil shop tab switch onto an EMPTY list. Normally the game moves the
+    /// cursor straight onto the first row of the new list (log 2026-10-06
+    /// 19:30:51, buy row -> buyback row in the same frame as the switch), and
+    /// <see cref="PrefixShopTab"/> names the tab in front of that row. An empty
+    /// list has no row to land on, so the tab is spoken here together with the
+    /// game's own empty-list text (Text id=15, "Keine verkaufbaren
+    /// Gegenstände.", dump 2026-10-06). A non-empty list is left to the focus
+    /// reader: recording the tab here would take the prefix away from it.
+    /// </summary>
+    private unsafe void OnShopUpdate(AddonEvent type, AddonArgs args)
+    {
+        var addon = (AtkUnitBase*)(nint)args.Addon;
+        if (addon == null || !addon->IsVisible) return;
+
+        var tab = ReadCheckedRadioLabel(addon);
+        if (tab.Length == 0 || tab == _lastShopTab) return;
+        if (_lastShopTab.Length == 0)
+        {
+            _lastShopTab = tab;
+            _log.Info($"[Shop] Start-Reiter: '{tab}'");
+            return;
+        }
+
+        var list  = FindListInAddon(addon);
+        var count = list != null ? GetListEntryCount(list) : -1;
+        if (count != 0) return;
+
+        _lastShopTab = tab;
+        var empty = ReadVisibleTopText(addon, 15);
+        if (empty.Length == 0)
+        {
+            _log.Warning("[Shop] Liste leer, aber Text id=15 nicht sichtbar - allgemeine Ansage.");
+            empty = AccessibilityStrings.NoEntries;
+        }
+        var spoken = $"{tab}. {empty}";
+        _log.Info($"[Shop] Reiter (leere Liste): '{spoken}'");
+        _tolk.SpeakInterrupt(spoken);
+    }
+
+    /// <summary>
+    /// Puts the Shop tab name in front of the first focus line after a switch
+    /// ("Zurückkaufen. 25, Stahl-Bärlatschen, ..."). The game moves the cursor
+    /// into the new list in the same frame, so a separate tab announcement
+    /// would be cut off by that row at once. The cursor resting on the tab
+    /// button itself already says the name and gets no prefix.
+    /// </summary>
+    private unsafe string PrefixShopTab(AtkResNode* node, string text)
+    {
+        if (FindAddonNameForNode(node) != "Shop") return text;
+        var addon = FindAddonForNode(node);
+        if (addon == null) return text;
+
+        var tab = ReadCheckedRadioLabel(addon);
+        if (tab.Length == 0 || tab == _lastShopTab) return text;
+
+        var isSwitch = _lastShopTab.Length > 0;
+        _lastShopTab = tab;
+        if (!isSwitch)
+        {
+            _log.Info($"[Shop] Start-Reiter: '{tab}'");
+            return text;
+        }
+        _log.Info($"[Shop] Reiter gewechselt: '{tab}'");
+        if (text.StartsWith(tab, StringComparison.Ordinal)) return text;
+        return $"{tab}. {text}";
+    }
+
+    /// <summary>Text of a top-level text node when it and all its parents are
+    /// visible, else "". The gil shop keeps its empty-list text in the tree at
+    /// all times and only shows it when the list is empty.</summary>
+    private static unsafe string ReadVisibleTopText(AtkUnitBase* addon, uint id)
+    {
+        var node = addon->GetNodeById(id);
+        if (node == null || node->Type != NodeType.Text) return string.Empty;
+        for (var cur = node; cur != null; cur = cur->ParentNode)
+            if (!cur->IsVisible()) return string.Empty;
+        return TolkService.Sanitize(AtkText.ReadClean((AtkTextNode*)node)).Trim();
+    }
+
     // -- GrandCompanyExchange: Kategorie-Reiter -----------------------
 
     // Active category tab last announced, so switching speaks it once.
@@ -2363,7 +2456,7 @@ public sealed class UIReaderService : IDisposable
         GcNavigationProbe(addon);
 #endif
 
-        var category = ReadCheckedGcCategory(addon);
+        var category = ReadCheckedRadioLabel(addon);
         if (string.IsNullOrEmpty(category) || category == _lastGcCategory) return;
 
         var isSwitch = _lastGcCategory.Length > 0;
@@ -2588,10 +2681,12 @@ public sealed class UIReaderService : IDisposable
     }
 #endif
 
-    /// <summary>Label of the currently checked category RadioButton, or "" if
-    /// none is checked yet. Scans the addon's top-level nodes; the checked
-    /// button with a text label (id=2) is the active category.</summary>
-    private unsafe string ReadCheckedGcCategory(AtkUnitBase* addon)
+    /// <summary>Label of the currently checked RadioButton, or "" if none is
+    /// checked yet. Scans the addon's top-level nodes; the checked button with a
+    /// text label (id=2) is the active tab. Used for the seal shop categories and
+    /// the gil shop's Kaufen/Zurückkaufen tabs (dump 2026-10-06: RadioButton
+    /// id=4/id=5, label = text child id=2).</summary>
+    private unsafe string ReadCheckedRadioLabel(AtkUnitBase* addon)
     {
         for (var i = 0; i < addon->UldManager.NodeListCount; i++)
         {
@@ -3976,6 +4071,7 @@ public sealed class UIReaderService : IDisposable
             // SpeakFocusInterrupt: yields to recent error toasts (equip fail
             // from ContextMenu "Anlegen" restored this slot and wiped the
             // reason — log 2026-09-28 09:16:00 / 09:19:58).
+            text = PrefixShopTab(node, text);
             _tolk.SpeakFocusInterrupt(text, (nint)node);
         }
     }
@@ -15458,6 +15554,8 @@ public sealed class UIReaderService : IDisposable
         _addonLifecycle.UnregisterListener(AddonEvent.PostUpdate, "JournalResult", OnDialogButtonProbe);
         _addonLifecycle.UnregisterListener(AddonEvent.PostUpdate, "ArmouryBoard",  OnArmouryBoardUpdate);
         _addonLifecycle.UnregisterListener(AddonEvent.PostUpdate, "GrandCompanyExchange", OnGrandCompanyUpdate);
+        _addonLifecycle.UnregisterListener(AddonEvent.PostSetup,  "Shop", OnShopSetup);
+        _addonLifecycle.UnregisterListener(AddonEvent.PostUpdate, "Shop", OnShopUpdate);
         _addonLifecycle.UnregisterListener(AddonEvent.PostUpdate, "GrandCompanyRank", OnGrandCompanyRankUpdate);
         _addonLifecycle.UnregisterListener(AddonEvent.PostUpdate, "Inventory", OnInventoryUpdate);
         _addonLifecycle.UnregisterListener(AddonEvent.PostUpdate, "Buddy", OnBuddyUpdate);
