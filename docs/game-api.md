@@ -1582,7 +1582,26 @@ dalamud.log 2026-10-06 06:28–07:02, `NodeFlags` per ilspycmd aus FFXIVClientSt
   aber schon – `IsVisible()` am Textknoten allein reicht nicht.
 - `CharacterProfile`: per Cursor erreichbar sind nur zwei Knöpfe (Titel
   „Andere Titel“, Comp id=7; Gesellschaft, Comp id=11). Namenstag,
-  Schutzgottheit usw. sind reine Textknoten.
+  Schutzgottheit usw. sind reine Textknoten. NUM8/NUM2 springen im Spiel NUR
+  zwischen diesen zwei Knöpfen hin und her (Log 2026-10-06 19:52, 24 Drücke).
+  - Zeilen (Res-Gruppe / Überschrift / Wert, flache NodeList des Addons):
+    Titel 2/3/6 (+ id=5, leer und versteckt), Staatl. Gesellschaft 8/9 und
+    Knopf id=11 mit Text id=4 Name, id=5 Rang, Freie Gesellschaft 12/13/16
+    (Gruppe versteckt ohne FC, gefüllt NICHT vermessen), Volk 17/18/20,
+    Anfangsstadt 21/22/25, Namenstag 26/27/29, Schutzgottheit 30/31/34.
+  - „Andere Titel“ ist ein Tooltip am Collision-Kind (id=3) von Comp id=7,
+    nicht am Komponentenknoten.
+  - Titel-Zeile zeigt den Charakternamen („Hagon Tusk“). Charakter ohne
+    erworbene Titel (Titelliste `CharacterTitle`: 1 Eintrag „(-)“, Log 20:12:16).
+    Wie die Zeile mit gesetztem Titel aussieht (id=5?), ist NICHT vermessen.
+  - `AtkUnitBase.SetFocusNode(collision, true)` setzt den Spielfokus hier
+    zuverlässig (ok=True, `AtkInputManager.FocusedNode` = Ziel, CursorTarget
+    bleibt 0); NUM0 drückt danach genau diesen Knopf (Rangfenster 20:06:14,
+    Titelliste 20:12:16).
+  - `KeyState[vk] = false` hält NUM8/NUM2 vom Spiel ab (kein Knopf-Hin-und-her
+    mehr während des Profil-Cursors, Test 2026-10-06 20:06-20:12).
+  - Plugin: `CharacterProfileHandler` (Num8/Num2 nur, solange der Spielfokus im
+    Reiter liegt; Umlauf; Num0 auf Textzeilen geschluckt).
 - Plugin: alle drei in `CharacterTabAddons` → `SpecialUpdateAddons` (kein
   FindFocusedText) und keine Sammel-Ansage in `OnAnyAddonOpen`;
   `TryReadCharacterTabFocusRow` liest Name + Wert per Id.
