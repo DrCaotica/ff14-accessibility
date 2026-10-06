@@ -1550,6 +1550,39 @@ Quelle: FFXIVClientStructs `AddonCharacter` (ilspycmd lokal gegen Dalamud-DLL).
   bei TabIndex-Wechsel; generischer Fokus-Leser stumm auf den vier Radios
   (`IsOwnerNodeAncestorOf`).
 
+#### Reiter-Inhalte: CharacterStatus / CharacterProfile / CharacterClass (2026-10-06)
+
+Quelle: Dumps `/acc dump` (Desktop\FFXIV_UI_Dump_Attribute/Profil/Klassen.txt),
+dalamud.log 2026-10-06 06:28–07:02, `NodeFlags` per ilspycmd aus FFXIVClientStructs.
+
+- Der Inhalt jedes Reiters ist ein EIGENES Addon unter `Character`:
+  Attribute = `CharacterStatus`, Profil = `CharacterProfile`,
+  Klassen/Jobs = `CharacterClass`, Ansehen = `CharacterRepute`. Es existiert nur
+  das Addon des offenen Reiters (`/acc dump` der anderen → „nicht offen“).
+  Strg+F5 dumpt nur `Character`, die Reiter-Addons brauchen `/acc dump <Name>`.
+- `NodeFlags` (ClientStructs): 0x10 = Visible, 0x100 = HasCollision,
+  0x400 = Focusable. 0x100 ist KEIN Fokus-Bit. In `CharacterStatus` tragen alle
+  22 Kollisionsknoten F=0x2733 – die Flags sagen nicht, welcher Eintrag gewählt
+  ist. Den echten Fokus trifft `UpdateGlobalFocus` (jeder Schritt im Log richtig).
+- Einträge, Knoten-Ids innerhalb der Komponente (flache NodeList):
+  - `CharacterStatus`, Comp CT=Base: Text id=2 Name, id=3 Wert, Collision id=4.
+  - `CharacterClass` Kampf/Magie/Sammler, Comp(1003) CT=Base: Text id=3 Name
+    (mit Leerzeichen am Ende, „Gärtner “), id=2 Stufe, Collision id=8.
+  - `CharacterClass` Handwerker, Comp(1001) CT=Button: Text id=3 Name (unter
+    Res id=2), id=5 Stufe, Collision id=12.
+  - Nicht freigeschaltete Klassen zeigen Stufe „0“.
+- `CharacterClass`: Umschaltknopf Comp id=2 (Button, Texte id=7
+  „Handwerker/Sammler“, id=6 „Krieger/Magier“) wechselt die sichtbare Gruppe.
+  Die versteckte Gruppe (Res id=69/81) und die Zeilen „Verwertungsgeschick“/
+  „Routine“ (Res id=97/91) haben kein Visible-Bit am ELTERNKNOTEN, ihre Texte
+  aber schon – `IsVisible()` am Textknoten allein reicht nicht.
+- `CharacterProfile`: per Cursor erreichbar sind nur zwei Knöpfe (Titel
+  „Andere Titel“, Comp id=7; Gesellschaft, Comp id=11). Namenstag,
+  Schutzgottheit usw. sind reine Textknoten.
+- Plugin: alle drei in `CharacterTabAddons` → `SpecialUpdateAddons` (kein
+  FindFocusedText) und keine Sammel-Ansage in `OnAnyAddonOpen`;
+  `TryReadCharacterTabFocusRow` liest Name + Wert per Id.
+
 ### Rangfenster (`GrandCompanyRank`) — aus Profil (2026-09-20)
 
 Quelle: Desktop-Dump `FFXIV_UI_Dump.txt` + dalamud.log 01:27.
