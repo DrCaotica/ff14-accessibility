@@ -1587,6 +1587,23 @@ dalamud.log 2026-10-06 06:28–07:02, `NodeFlags` per ilspycmd aus FFXIVClientSt
   FindFocusedText) und keine Sammel-Ansage in `OnAnyAddonOpen`;
   `TryReadCharacterTabFocusRow` liest Name + Wert per Id.
 
+#### Reiter Ansehen: CharacterRepute (2026-10-06)
+
+Quelle: Dumps `/acc dump CharacterRepute` (Desktop\FFXIV_UI_Dump_Zimmerer.txt /
+_Mönch.txt, identisch; Charakter ohne Freundesvölker).
+
+- Top-Level: Text id=3 „Ehrungen als wertvollster Spieler“, Comp id=5 (1012,
+  Base) mit Text id=5 = Anzahl („0“), Collision id=4, Symbol id=3.
+- Text id=10 „Verbundenheit mit den Freundesvölkern“, Text id=8
+  „Freundesvölker-Vollmachten“, Text id=9 Wert („0/0“).
+- Comp id=12 DropDownList (Auswahl Freundesvolk, leer, ListLen=0) und
+  Comp id=13 List (ListLen=0, 7 Renderer mit leeren Texten).
+- Beim Wechsel setzt das Spiel den Cursor auf „Weggesteckte Waffen/Werkzeuge
+  anzeigen“ im Hauptfenster (Log 17:58:33), nicht in den Reiter. Ob Einträge
+  des Reiters per Cursor erreichbar sind, ist nicht geprüft.
+- Plugin: leere Liste → `ReadEmptyCharacterRepute` statt „Keine Einträge“.
+  Gefüllte Liste (Freundesvölker freigeschaltet) NICHT vermessen.
+
 ### Rangfenster (`GrandCompanyRank`) — aus Profil (2026-09-20)
 
 Quelle: Desktop-Dump `FFXIV_UI_Dump.txt` + dalamud.log 01:27.

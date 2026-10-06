@@ -1199,7 +1199,13 @@ public sealed class UIReaderService : IDisposable
             if ((DateTime.UtcNow - since).TotalSeconds < EmptyListWaitS) return;
             _emptyListSince.Remove(name);
             _log.Info($"[Accessibility] {name}: Liste bleibt leer.");
-            if (!IsSocialChildDuringGrace(name, addon)) _tolk.Speak(AccessibilityStrings.NoEntries);
+            if (IsSocialChildDuringGrace(name, addon)) return;
+            if (name == "CharacterRepute")
+            {
+                _tolk.Speak(ReadEmptyCharacterRepute(addon));
+                return;
+            }
+            _tolk.Speak(AccessibilityStrings.NoEntries);
             return;
         }
 
@@ -1208,6 +1214,40 @@ public sealed class UIReaderService : IDisposable
         _log.Info($"[Accessibility] {name}: Liste nachtraeglich gefuellt ({count} Eintraege)");
         if (IsSocialChildDuringGrace(name, addon)) return;
         _tolk.Speak(AccessibilityStrings.ListSummary(sel, count));
+    }
+
+    // CharacterRepute (Charakter -> Ansehen), top-level ids from the dumps
+    // 2026-10-06 18:09/18:11 (Desktop\FFXIV_UI_Dump_Zimmerer/Mönch.txt).
+    private const uint ReputeMvpLabel       = 3; // "Ehrungen als wertvollster Spieler"
+    private const uint ReputeMvpComp        = 5; // Comp(1012), Text id=5 = count
+    private const uint ReputeMvpValue       = 5;
+    private const uint ReputeAllowanceLabel = 8; // "Freundesvölker-Vollmachten"
+    private const uint ReputeAllowanceValue = 9; // "0/0"
+
+    /// <summary>
+    /// The reputation tab with no allied society unlocked: its list is empty,
+    /// but the tab still shows the commendation count and the allowances.
+    /// A bare "Keine Einträge" hid both and gave no subject (User 2026-10-06).
+    /// Labels and values come from the window itself. A filled list is not
+    /// handled here - its layout has not been measured.
+    /// </summary>
+    private unsafe string ReadEmptyCharacterRepute(AtkUnitBase* addon)
+    {
+        var mvpLabel   = TolkService.Sanitize(ReadTopText(addon, ReputeMvpLabel)).Trim();
+        var mvpValue   = TolkService.Sanitize(ReadAddonComponentText(addon, ReputeMvpComp, ReputeMvpValue)).Trim();
+        var allowLabel = TolkService.Sanitize(ReadTopText(addon, ReputeAllowanceLabel)).Trim();
+        var allowValue = TolkService.Sanitize(ReadTopText(addon, ReputeAllowanceValue)).Trim();
+
+        if (mvpLabel.Length == 0 || mvpValue.Length == 0 || allowLabel.Length == 0 || allowValue.Length == 0)
+        {
+            _log.Warning($"[Character] Ansehen-Reiter nicht vollstaendig lesbar: '{mvpLabel}'='{mvpValue}', " +
+                         $"'{allowLabel}'='{allowValue}' - nur 'Keine Einträge' angesagt.");
+            return AccessibilityStrings.NoEntries;
+        }
+
+        var line = AccessibilityStrings.CharacterReputeEmpty(mvpLabel, mvpValue, allowLabel, allowValue);
+        _log.Info($"[Character] Ansehen: '{line}'");
+        return line;
     }
 
     private unsafe void FlushPendingSocialTab(AtkUnitBase* addon)
