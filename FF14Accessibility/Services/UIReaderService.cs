@@ -3077,6 +3077,8 @@ public sealed class UIReaderService : IDisposable
         {
             _lastCharacterTabIndex = -1;
             _characterNotReadyLogged = false;
+            _pendingCharacterTabHeader = string.Empty;
+            _characterTabHeaderNode    = 0;
             return;
         }
 
@@ -3116,10 +3118,45 @@ public sealed class UIReaderService : IDisposable
         _log.Info($"[Character] Registerkarte: '{spoken}'");
         _tolk.SpeakInterrupt(spoken);
 
-        // New panel: allow the next focus read even if the node pointer matches.
-        _lastFocusedNodePtr = 0;
-        _lastFocusedNodeText = string.Empty;
-        _lastFocusedNodeStable = string.Empty;
+        // The game moves the cursor into the new tab 20-40 ms later ("Stärke",
+        // "Andere Titel", or "Weggesteckte Waffen/Werkzeuge anzeigen" for the
+        // reputation tab - log 2026-10-06 17:57-17:58), and that interrupting
+        // focus line cut the tab name off. The focus reader now folds the header
+        // into that line instead. No focus-dedup reset any more: when the cursor
+        // stays on the gearset list, re-reading it would cut the header too.
+        _pendingCharacterTabHeader = spoken;
+        _characterTabHeaderNode    = 0;
+    }
+
+    // Tab header waiting for the first focus line after a tab switch, and the
+    // node that line was spoken for (0 = none yet). See PrefixCharacterTabHeader.
+    private string _pendingCharacterTabHeader = string.Empty;
+    private nint   _characterTabHeaderNode;
+
+    /// <summary>
+    /// Puts the pending Character tab header in front of the first focus line
+    /// after a tab switch, so the cursor landing in the new tab no longer cuts
+    /// the tab name off. The same node keeps the prefix while its text settles
+    /// ("Stärke" -> "Stärke 29" one frame later); any other node ends it.
+    /// </summary>
+    private unsafe string PrefixCharacterTabHeader(AtkResNode* node, string text)
+    {
+        if (_pendingCharacterTabHeader.Length == 0) return text;
+
+        if (_characterTabHeaderNode == 0 || _characterTabHeaderNode == (nint)node)
+        {
+            var addonName = FindAddonNameForNode(node);
+            if (addonName == "Character" || addonName == "CharacterRepute"
+                || CharacterTabAddons.Contains(addonName))
+            {
+                _characterTabHeaderNode = (nint)node;
+                return $"{_pendingCharacterTabHeader}. {text}";
+            }
+        }
+
+        _pendingCharacterTabHeader = string.Empty;
+        _characterTabHeaderNode    = 0;
+        return text;
     }
 
     /// <summary>Which Character tab radio contains the stage focus, or -1.</summary>
@@ -4030,6 +4067,7 @@ public sealed class UIReaderService : IDisposable
             // SpeakFocusInterrupt: yields to recent error toasts (equip fail
             // from ContextMenu "Anlegen" restored this slot and wiped the
             // reason — log 2026-09-28 09:16:00 / 09:19:58).
+            text = PrefixCharacterTabHeader(node, text);
             _tolk.SpeakFocusInterrupt(text, (nint)node);
         }
     }
