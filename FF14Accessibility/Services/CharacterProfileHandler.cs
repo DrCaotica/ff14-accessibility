@@ -67,6 +67,8 @@ public sealed unsafe class CharacterProfileHandler
     private int _index = -1;
     // The tab is rebuilt on every switch to it; a new instance starts fresh.
     private nint _addon;
+    // Last game focus node the cursor was synced to (see DescribeFocusedButton).
+    private nint _lastFocusSeen;
 
     /// <summary>Creates the handler.</summary>
     public CharacterProfileHandler(IGameGui gameGui, TolkService tolk, TooltipService tooltips, IPluginLog log)
@@ -156,8 +158,17 @@ public sealed unsafe class CharacterProfileHandler
             if (line.Kind == ButtonKind.None) continue;
             var comp = addon->GetNodeById(line.Button);
             if (comp == null || !IsSelfOrAncestor(comp, node)) continue;
-            if ((nint)addon != _addon) _addon = (nint)addon;
-            _index = i;
+            // Follow the game's focus only when it really MOVED here (mouse, or
+            // the game's own cursor). The focus reader asks again while the
+            // focus just rests on the button, and re-syncing then pulled the
+            // cursor back onto the button after every step on a text line -
+            // NUM2 gave "Volk" on every press (log 2026-10-06 20:06:03-06).
+            if ((nint)node != _lastFocusSeen || (nint)addon != _addon)
+            {
+                _addon         = (nint)addon;
+                _lastFocusSeen = (nint)node;
+                _index         = i;
+            }
             return DescribeLine(addon, line);
         }
         return null;
@@ -190,8 +201,12 @@ public sealed unsafe class CharacterProfileHandler
         if (line.Kind == ButtonKind.Title)
         {
             // The button has no text of its own; the game binds "Andere Titel"
-            // to it as a tooltip (log 2026-10-06 18:06:22).
-            var label = _tooltips.TryGetTooltipDeep(addon->GetNodeById(line.Button)) ?? string.Empty;
+            // as a tooltip to its Collision child, the node the focus sits on
+            // (log 2026-10-06 18:06:22). Asking the component node itself found
+            // nothing (log 20:06:24: "Titel: Hagon Tusk" without the label).
+            var comp  = GetComponent(addon, line.Button);
+            var hit   = comp != null ? FindCollision(comp) : null;
+            var label = hit != null ? _tooltips.TryGetTooltipDeep(hit) ?? string.Empty : string.Empty;
             if (label.Length > 0) text = $"{text}. {label}";
         }
         return text;
@@ -209,12 +224,7 @@ public sealed unsafe class CharacterProfileHandler
     {
         var comp = GetComponent(addon, line.Button);
         if (comp == null) return;
-        AtkResNode* target = null;
-        for (var i = 0; i < comp->UldManager.NodeListCount; i++)
-        {
-            var n = comp->UldManager.NodeList[i];
-            if (n != null && n->Type == NodeType.Collision) { target = n; break; }
-        }
+        var target = FindCollision(comp);
         if (target == null)
         {
             _log.Warning($"[Profil] Knopf id={line.Button} ohne Collision-Knoten.");
@@ -222,6 +232,7 @@ public sealed unsafe class CharacterProfileHandler
         }
 
         var before = (nint)GetGameFocus();
+        _lastFocusSeen = (nint)target;
         if (before == (nint)target) return;
         try
         {
@@ -298,6 +309,17 @@ public sealed unsafe class CharacterProfileHandler
         for (var cur = node; cur != null; cur = cur->ParentNode)
             if (!cur->IsVisible()) return false;
         return true;
+    }
+
+    /// <summary>First Collision node in a component's node list, or null.</summary>
+    private static AtkResNode* FindCollision(AtkComponentBase* comp)
+    {
+        for (var i = 0; i < comp->UldManager.NodeListCount; i++)
+        {
+            var n = comp->UldManager.NodeList[i];
+            if (n != null && n->Type == NodeType.Collision) return n;
+        }
+        return null;
     }
 
     /// <summary>Node with this id in a component's flat node list, or null.</summary>
