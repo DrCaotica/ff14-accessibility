@@ -1549,6 +1549,10 @@ Quelle: FFXIVClientStructs `AddonCharacter` (ilspycmd lokal gegen Dalamud-DLL).
 - Plugin: `OnCharacterUpdate` — Fokus auf anderem Reiter → `SetTab`; Ansage
   bei TabIndex-Wechsel; generischer Fokus-Leser stumm auf den vier Radios
   (`IsOwnerNodeAncestorOf`).
+- Öffnen (Log 2026-10-06): das erste PostUpdate kommt ~50 ms VOR PostSetup.
+  Dann stehen `TabIndex`=0 / `TabCount`=3 (Vorgabe, nicht der echte Stand).
+  `OnCharacterUpdate` wartet deshalb auf `AtkUnitBase.IsReady` (ClientStructs:
+  "OnSetup was called", Flags1A1 Bit 0).
 
 #### Reiter-Inhalte: CharacterStatus / CharacterProfile / CharacterClass (2026-10-06)
 
