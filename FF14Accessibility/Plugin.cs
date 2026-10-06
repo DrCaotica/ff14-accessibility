@@ -69,6 +69,7 @@ public sealed class Plugin : IDalamudPlugin
     // ueber Behaelter und Platznummer statt ueber das Symbol.
     private readonly ItemSlotService    _itemSlots;
     private readonly LootRollService    _lootRolls;
+    private CharacterProfileHandler?    _profileCursor;
     private readonly EquipmentService   _equipment;
     private readonly GearInfoService    _gearInfo;
     // [Ausruestungs-Vergleich] Sagt das Vergleichsfenster des Spiels an.
@@ -697,6 +698,8 @@ public sealed class Plugin : IDalamudPlugin
         // Der Fokus-Leser benennt die Plaetze, die nur Symbole sind; die Ebene liefert
         // dem Ergebnisschirm seine Gegenprobe. Beide als Property, aus demselben Grund.
         _uiReader.DeepDungeonPanel = _deepPanel;
+        _profileCursor = new CharacterProfileHandler(GameGui, _tolk, _tooltips, Log);
+        _uiReader.CharacterProfile = _profileCursor;
         _uiReader.DeepDungeonFloor = _deepFloor;
 
         RegisterCommands();
@@ -1430,6 +1433,34 @@ public sealed class Plugin : IDalamudPlugin
     // swallow list - the menu ignores them in the key step, but the game must
     // not see them there either.
     private static readonly int[] SkillMenuVks = { 0x68, 0x62, 0x60, 0x6E, 0x64, 0x66 };
+
+    // NUMPAD8=0x68, NUMPAD2=0x62, NUMPAD0=0x60.
+    private static readonly int[] ProfileCursorVks = { 0x68, 0x62 };
+
+    /// <summary>
+    /// Character window, Profile tab: NUM8/NUM2 walk the tab's lines instead
+    /// of only toggling between its two buttons (user decision 2026-10-06, see
+    /// CharacterProfileHandler). Active only while the game's focus is inside
+    /// the tab, so title list and rank window keep their own navigation.
+    /// NUM0 is swallowed on plain text lines only; on a button line it reaches
+    /// the game and presses that button.
+    /// </summary>
+    private void HandleProfileCursorKeys()
+    {
+        if (_profileCursor == null || !_profileCursor.IsActive) return;
+
+        if (IsJustPressed("Numpad8"))      _profileCursor.Move(-1);
+        else if (IsJustPressed("Numpad2")) _profileCursor.Move(+1);
+
+        foreach (var vk in ProfileCursorVks)
+        {
+            var key = (Dalamud.Game.ClientState.Keys.VirtualKey)vk;
+            if (KeyState.IsVirtualKeyValid(vk) && KeyState[key])
+                KeyState[key] = false;
+        }
+        if (_profileCursor.IsOnTextLine && KeyState[(Dalamud.Game.ClientState.Keys.VirtualKey)0x60])
+            KeyState[(Dalamud.Game.ClientState.Keys.VirtualKey)0x60] = false;
+    }
 
     /// <summary>
     /// While the modal assignment menu is open (key first, then what goes on
@@ -2424,6 +2455,7 @@ public sealed class Plugin : IDalamudPlugin
         if (IsJustPressed(_config.KeyReadLootRolls)) _lootRolls.AnnounceOpenRolls();
         if (IsJustPressed(_config.KeyFocusLootRolls)) _lootRolls.FocusRollWindow();
         HandleSkillMenuKeys();
+        HandleProfileCursorKeys();
         // DIESELBEN TASTEN, ZWEI SYSTEME. Die vier gewohnten Tasten gibt es in
         // beiden - im alten fuehren sie durch die festen Kategorien, im neuen
         // durch die Puffer der Spielregister. Welche Bedeutung gilt, entscheidet

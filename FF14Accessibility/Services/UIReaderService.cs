@@ -446,6 +446,12 @@ public sealed class UIReaderService : IDisposable
     public DeepDungeonPanel? DeepDungeonPanel { get; set; }
 
     /// <summary>
+    /// Cursor over the character profile tab, or null while not set. Supplies
+    /// the full line for the tab's two buttons to the focus reader.
+    /// </summary>
+    public CharacterProfileHandler? CharacterProfile { get; set; }
+
+    /// <summary>
     /// [Tiefes Gewoelbe] Die Ebene, damit die geoeffneten Truhen eines Laufs neben die
     /// Truhen-Zaehlung des Ergebnisschirms ins Log geschrieben werden koennen. Property
     /// aus demselben Grund wie oben.
@@ -3700,6 +3706,14 @@ public sealed class UIReaderService : IDisposable
             // Inventar-Gegenstand aufgeloest wuerde - der Name allein, ohne den
             // Stand daneben, waere die halbe Auskunft.
             text = currencyRow;
+        }
+        else if (CharacterProfile?.DescribeFocusedButton(node) is { } profileRow)
+        {
+            // Profil-Reiter: die zwei Knoepfe sagen Ueberschrift und Wert
+            // ("Staatliche Gesellschaft: Bruderschaft der Morgenviper, Zweiter
+            // Novize") statt nur den Namen. Gleicher Wortlaut wie der
+            // Profil-Cursor, damit dessen Ansage nicht doppelt kommt.
+            text = profileRow;
         }
         else if (TryReadCharacterTabFocusRow(node, out var characterTabRow))
         {

@@ -1902,6 +1902,18 @@ public static partial class AccessibilityStrings
     public static string LabelWithValue(string label, string value) => $"{label} {value}";
 
     /// <summary>
+    /// One line of the character profile tab ("Anfangsstadt: Ul'dah",
+    /// "Staatliche Gesellschaft: Bruderschaft der Morgenviper, Zweiter Novize").
+    /// Heading and value both come from the game in the client language.
+    /// </summary>
+    public static string ProfileEntry(string heading, string value) => $"{heading}: {value}";
+
+    /// <summary>The profile cursor could not move the game's focus onto a button.</summary>
+    public static string ProfileFocusFailed => IsGerman
+        ? "Knopf konnte nicht angewählt werden."
+        : "Could not select the button.";
+
+    /// <summary>
     /// Class entry in the character window ("Zimmerer, Stufe 7"). The level is
     /// passed as the game shows it, not parsed.
     /// </summary>
