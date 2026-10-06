@@ -1885,6 +1885,20 @@ public static partial class AccessibilityStrings
     /// </summary>
     public static string AmountWithLabel(string amount, string label) => $"{amount} {label}";
 
+    /// <summary>
+    /// Attribute entry in the character window: label first, then its value
+    /// ("Stärke 246"). Both parts come from the game in the client language,
+    /// so this format adds no words of its own.
+    /// </summary>
+    public static string LabelWithValue(string label, string value) => $"{label} {value}";
+
+    /// <summary>
+    /// Class entry in the character window ("Zimmerer, Stufe 7"). The level is
+    /// passed as the game shows it, not parsed.
+    /// </summary>
+    public static string ClassWithLevel(string name, string level) =>
+        IsGerman ? $"{name}, Stufe {level}" : $"{name}, level {level}";
+
     // ── Belohnungs-Zeile (JournalResult) ─────────────────────────────
     // Currency type is only a UI image, so the mod labels amounts by position.
     public static string[] RewardCurrencyLabels =>

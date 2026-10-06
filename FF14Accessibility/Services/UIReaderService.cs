@@ -199,6 +199,18 @@ public sealed class UIReaderService : IDisposable
         "LotteryDaily",
     ];
 
+    // Inhalt der Reiter im Charakterfenster (Attribute, Profil, Klassen/Jobs):
+    // eigene Addons unter "Character", es existiert nur der offene Reiter
+    // (/acc dump der anderen: "nicht offen", Log 2026-10-06). Muss VOR
+    // SpecialUpdateAddons stehen - statische Felder werden in Textreihenfolge
+    // initialisiert, und die Liste dort uebernimmt diese Eintraege.
+    private static readonly HashSet<string> CharacterTabAddons =
+    [
+        "CharacterStatus",
+        "CharacterProfile",
+        "CharacterClass",
+    ];
+
     // Addons, bei denen Universal-Update/ReceiveEvent nicht l�uft
     private static readonly HashSet<string> SpecialUpdateAddons =
     [
@@ -304,6 +316,15 @@ public sealed class UIReaderService : IDisposable
         XbmNotebookService.AddonName,
         // Detail-Kind: nur „SEITE AN SEITE“; User will Namen im Raster, nicht hier.
         "XBMMonsterBookDetail",
+        // Charakterfenster-Reiter (CharacterTabAddons): FindFocusedText prueft 0x100, laut ClientStructs
+        // NodeFlags ist das HasCollision, nicht Fokus - und alle Eintraege tragen
+        // es gleich (Dump 2026-10-06 CharacterStatus: 22 Kollisionsknoten, alle
+        // F=0x2733). Ergebnis war immer der erste Eintrag, unterbrechend:
+        // „Frömmigkeit“, „Bruderschaft der Morgenviper“, und in CharacterClass
+        // „Fischer“ direkt nach dem echten „Druide“ (Log 2026-10-06 06:28:30).
+        // UpdateGlobalFocus traf im selben Log jeden Schritt richtig (Stärke,
+        // Geschick, Willenskraft, ...) und liest die Reiter allein.
+        .. CharacterTabAddons,
     ];
 
     // HUD-Anzeigen, deren Text/Fokus sich im normalen Spiel laufend aendert -
@@ -932,6 +953,19 @@ public sealed class UIReaderService : IDisposable
         if (name.StartsWith("Config", StringComparison.Ordinal))
         {
             _log.Info($"[Accessibility] {name}: Formular-Fenster, keine Sammel-Ansage beim Oeffnen.");
+            return;
+        }
+        // Charakter-Reiter: oben liegen nur Ueberschriften, Namen und Werte
+        // stecken in den Eintraegen. Die Sammel-Ansage war darum eine Kette
+        // von Ueberschriften ohne Werte, teils aus versteckten Gruppen, weil
+        // IsVisible nur den Knoten selbst prueft: Klassen/Jobs sprach
+        // "/. :. Verwertungsgeschick. Routine. Sammler. Handwerker. ..." -
+        // die Eltern dieser Texte (Res 97, 91, 81, 69) tragen kein Visible-Bit
+        // (Dump 2026-10-06). Der Reitername kommt aus dem Character-Fenster,
+        // die Eintraege liest UpdateGlobalFocus einzeln mit Wert.
+        if (CharacterTabAddons.Contains(name))
+        {
+            _log.Info($"[Accessibility] {name}: Charakter-Reiter, keine Sammel-Ansage beim Oeffnen.");
             return;
         }
         if (!string.IsNullOrWhiteSpace(text))
@@ -3573,6 +3607,13 @@ public sealed class UIReaderService : IDisposable
             // Stand daneben, waere die halbe Auskunft.
             text = currencyRow;
         }
+        else if (TryReadCharacterTabFocusRow(node, out var characterTabRow))
+        {
+            // Charakter-Reiter Attribute und Klassen/Jobs: Name vor Wert, und
+            // einstellige Werte ("Zimmerer, Stufe 7") gehen nicht verloren -
+            // der generische Leser verwirft Texte mit nur einem Zeichen.
+            text = characterTabRow;
+        }
         else if (TryReadAchievementHeaderFocus(node, out var achievementHeader))
         {
             // Errungenschaften: das Punkte- bzw. Zertifikat-Symbol sagt seine
@@ -5805,6 +5846,95 @@ public sealed class UIReaderService : IDisposable
             if (found != null) return found;
         }
         return null;
+    }
+
+    /// <summary>
+    /// Liest den fokussierten Eintrag der Charakter-Reiter Attribute
+    /// (<c>CharacterStatus</c>) und Klassen/Jobs (<c>CharacterClass</c>) als
+    /// Name plus Wert: "Stärke 246", "Zimmerer, Stufe 7".
+    ///
+    /// ANLASS (Log 2026-10-06): der generische <see cref="GetTextFromNodeTree"/>
+    /// verwirft Texte mit einem Zeichen (t.Length > 1). "Zimmerer" kam ohne
+    /// seine Stufe "7", "Verteidigung" ohne den Wert "2", waehrend "Mönch, 46"
+    /// vollstaendig war. Ausserdem stand der Wert vor dem Namen ("246, Stärke"),
+    /// weil die Knotenliste den Wert zuerst fuehrt. Reihenfolge und Wortlaut
+    /// "Zimmerer, Stufe 7" / "Stärke 246" hat der User festgelegt.
+    ///
+    /// KNOTEN-IDS (Dumps 2026-10-06, Desktop\FFXIV_UI_Dump_Attribute/Klassen):
+    ///   CharacterStatus, jeder der 22 Eintraege (Comp CT=Base):
+    ///     id=2 Name, id=3 Wert.
+    ///   CharacterClass, Kampf-, Magie- und Sammlerklassen (Comp(1003) CT=Base):
+    ///     id=3 Name ("Gärtner "), id=2 Stufe ("0").
+    ///   CharacterClass, Handwerker (Comp(1001) CT=Button):
+    ///     id=3 Name ("Zimmerer ", unter Res id=2), id=5 Stufe ("7").
+    /// Nicht freigeschaltete Klassen zeigen im Spiel "0" - das wird so gesagt.
+    /// Passt ein Eintrag nicht in dieses Muster (z. B. der Umschaltknopf
+    /// Handwerker/Sammler, dessen id=3 kein Text ist), steigt der Leser aus und
+    /// der generische Pfad liest wie bisher.
+    /// </summary>
+    private unsafe bool TryReadCharacterTabFocusRow(AtkResNode* node, out string text)
+    {
+        text = string.Empty;
+        if (node == null) return false;
+        var addonName = FindAddonNameForNode(node);
+        var isStatus  = string.Equals(addonName, "CharacterStatus", StringComparison.Ordinal);
+        var isClass   = string.Equals(addonName, "CharacterClass", StringComparison.Ordinal);
+        if (!isStatus && !isClass) return false;
+
+        // Zur naechsten Komponente hoch - der Fokus sitzt auf dem Kollisionskind
+        // des Eintrags (Log 2026-10-06: id=4 in CharacterStatus, id=8 bzw. id=12
+        // in CharacterClass), der Knoten selbst wird mitgeprueft.
+        AtkComponentBase* comp = null;
+        var cur = node;
+        for (var up = 0; up < 4 && cur != null; up++, cur = cur->ParentNode)
+        {
+            if ((int)cur->Type < 1000) continue;
+            var candidate = ((AtkComponentNode*)cur)->Component;
+            if (candidate == null) continue;
+            comp = candidate;
+            break;
+        }
+        if (comp == null) return false;
+
+        uint nameId, valueId;
+        if (isStatus)
+        {
+            nameId  = 2;
+            valueId = 3;
+        }
+        else
+        {
+            nameId  = 3;
+            valueId = comp->GetComponentType() == ComponentType.Button ? 5u : 2u;
+        }
+
+        var name  = ReadComponentText(comp, nameId);
+        var value = ReadComponentText(comp, valueId);
+        if (string.IsNullOrEmpty(name)) return false;
+
+        if (string.IsNullOrEmpty(value)) text = name;
+        else text = isStatus
+            ? AccessibilityStrings.LabelWithValue(name, value)
+            : AccessibilityStrings.ClassWithLevel(name, value);
+        return true;
+    }
+
+    /// <summary>
+    /// Text des sichtbaren Textknotens mit dieser Id in der Knotenliste der
+    /// Komponente, getrimmt; leer, wenn es ihn nicht gibt. Die Liste ist flach,
+    /// verschachtelte Knoten (Handwerker: Text id=3 unter Res id=2) stehen mit
+    /// darin (Dump 2026-10-06).
+    /// </summary>
+    private static unsafe string ReadComponentText(AtkComponentBase* comp, uint nodeId)
+    {
+        for (var j = 0; j < comp->UldManager.NodeListCount; j++)
+        {
+            var child = comp->UldManager.NodeList[j];
+            if (child == null || child->NodeId != nodeId) continue;
+            if (child->Type != NodeType.Text || !child->IsVisible()) return string.Empty;
+            return AtkText.ReadClean((AtkTextNode*)child).Trim();
+        }
+        return string.Empty;
     }
 
     /// <summary>
