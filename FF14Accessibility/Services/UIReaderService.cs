@@ -867,6 +867,10 @@ public sealed class UIReaderService : IDisposable
         {
             PushMenu(name, list->SelectedItemIndex);
 
+            // WORKAROUND: Shop rows belong to the focus reader alone (quantity
+            // field, hint, gear info); see IsFocusOwnedList.
+            if (IsFocusOwnedList(name)) return;
+
             // Nur Anzahl + aktuell gew�hlten Eintrag ansagen.
             // Alle Eintr�ge zu iterieren kann bei langen Listen zu Crashes f�hren
             // (uninitialisierte Renderer bei virtuell scrollenden Listen).
@@ -12705,6 +12709,25 @@ public sealed class UIReaderService : IDisposable
                 list->HeldItemIndex, hl.ToString());
     }
 
+    /// <summary>
+    /// Windows whose list rows are spoken by the focus reader only, never by the
+    /// generic list announcements (open summary, late-fill, row tracking).
+    ///
+    /// Shop: the focus reader has always spoken these rows. While FindListInAddon
+    /// returned the hidden, empty buyback list, the list path stayed silent;
+    /// since it finds the visible buy list it spoke every row too -
+    /// "0, 5.541, Mithril-Barbuta" and 8 ms later the focus line cut it off, so
+    /// each step began with a bare "0" (log 2026-10-06 19:11:59.901/.909). The
+    /// two texts differ (the list path keeps the one-character "Vorrat" column,
+    /// English "Bag", Addon sheet row 358), so the speech debounce cannot merge
+    /// them, and the list path's open summary was cut off the same way.
+    /// Clean path considered: one row reader for both paths, so the debounce
+    /// drops the repeat - not taken because it would change what the focus
+    /// reader says in every other window too (it drops one-character texts).
+    /// Approved by the user 2026-10-06.
+    /// </summary>
+    private static bool IsFocusOwnedList(string name) => name == "Shop";
+
     private unsafe void TrackListIndices(string name, AtkComponentList* list)
     {
         var state = ReadListIndices(list);
@@ -12718,6 +12741,9 @@ public sealed class UIReaderService : IDisposable
 
         _listIndexState[name] = state;
         _log.Info($"[ListProbe] {name}: Sel={state.Sel} Hov={state.Hov} Hov2={state.Hov2} Hov3={state.Hov3} Held={state.Held} HL=[{state.Hl}]");
+
+        // WORKAROUND: the focus reader already speaks this row; see IsFocusOwnedList.
+        if (IsFocusOwnedList(name)) return;
 
         // Announce the row of whichever candidate moved. Priority is only a
         // tie-breaker; the probe log shows which one actually fired so the
