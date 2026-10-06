@@ -3061,6 +3061,7 @@ public sealed class UIReaderService : IDisposable
     // -- Character (Charakter-Fenster, Taste C) -----------------------
 
     private int _lastCharacterTabIndex = -1;
+    private bool _characterNotReadyLogged;
 
     /// <summary>
     /// Character window tabs (Attributes / Profile / Classes / Reputation).
@@ -3075,10 +3076,26 @@ public sealed class UIReaderService : IDisposable
         if (addon == null || !addon->IsVisible)
         {
             _lastCharacterTabIndex = -1;
+            _characterNotReadyLogged = false;
             return;
         }
 
         var character = (AddonCharacter*)addon;
+
+        // The game updates the window once before OnSetup ran (log 2026-10-06:
+        // PostUpdate 50 ms before PostSetup). TabIndex/TabCount still hold
+        // defaults then (0 of 3), which was spoken as "Attribute, Registerkarte
+        // 1 von 3" on every open. IsReady is ClientStructs' "OnSetup was called".
+        if (!addon->IsReady)
+        {
+            if (!_characterNotReadyLogged)
+            {
+                _characterNotReadyLogged = true;
+                _log.Info($"[Character] Noch nicht bereit (IsReady=false), TabIndex={character->TabIndex} " +
+                          $"TabCount={character->TabCount} - keine Ansage.");
+            }
+            return;
+        }
         var focusedTab = FindFocusedCharacterTabIndex(character);
         if (focusedTab >= 0 && focusedTab != character->TabIndex)
         {
