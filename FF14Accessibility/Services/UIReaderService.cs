@@ -12899,8 +12899,18 @@ public sealed class UIReaderService : IDisposable
         return addon->HostId == socialId || addon->ParentId == socialId;
     }
 
+    /// <summary>
+    /// The window's list. With several lists the VISIBLE one wins: the gil shop
+    /// (Shop) holds its buyback list (id=17) before its buy list (id=16) and
+    /// only hides whichever tab is not active (dumps 2026-10-06 19:04/19:05).
+    /// Taking the first list read the hidden, usually empty buyback list on the
+    /// Buy tab and announced "Keine Einträge" over 14 wares. When no list is
+    /// visible, the first one is returned as before.
+    /// </summary>
     private static unsafe AtkComponentList* FindListInAddon(AtkUnitBase* addon)
     {
+        AtkComponentList* first = null;
+
         // Component nodes carry RAW type values >= 1000 (NodeType.Component
         // = 10000 is only what GetNodeType() returns, ilspycmd 2026-07-11).
         // The old check `Type != NodeType.Component` was therefore NEVER true
@@ -12914,7 +12924,11 @@ public sealed class UIReaderService : IDisposable
             var comp = ((AtkComponentNode*)node)->Component;
             if (comp == null) continue;
             if (IsListComponent(comp->GetComponentType()))
-                return (AtkComponentList*)comp;
+            {
+                if (node->IsVisible()) return (AtkComponentList*)comp;
+                if (first == null) first = (AtkComponentList*)comp;
+                continue;
+            }
             // A DropDownList keeps its options in an inner List component. That
             // is a collapsed SETTING inside a form, never the window's own menu.
             // Descending into it made the chat-log config panel announce
@@ -12932,11 +12946,12 @@ public sealed class UIReaderService : IDisposable
                 if (inner == null || (int)inner->Type < 1000) continue;
                 var innerComp = ((AtkComponentNode*)inner)->Component;
                 if (innerComp == null) continue;
-                if (IsListComponent(innerComp->GetComponentType()))
-                    return (AtkComponentList*)innerComp;
+                if (!IsListComponent(innerComp->GetComponentType())) continue;
+                if (node->IsVisible() && inner->IsVisible()) return (AtkComponentList*)innerComp;
+                if (first == null) first = (AtkComponentList*)innerComp;
             }
         }
-        return null;
+        return first;
     }
 
     // -- Bestiarium (Jagdtagebuch / MonsterNote) --------------------

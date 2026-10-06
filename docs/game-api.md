@@ -3057,6 +3057,18 @@ ClientStructs: `AddonItemSearch` (`ResultsList`, `SearchButton`, `FilterLabels`,
 
 Noch nicht belegt: Preiszeilen-Detail, Kauf, HQ/Menge.
 
+## Händler (Addon `Shop`): Kauf- und Rückkaufliste (Dumps 2026-10-06)
+
+- Reiter = RadioButtons id=4 „Kaufen“ und id=5 „Zurückkaufen“ (Wechsel Num7/Num9).
+- In `UldManager.NodeList` steht die Rückkaufliste id=17 (Index 7) VOR der Kaufliste
+  id=16 (Index 8). Beide existieren immer, der inaktive Reiter wird nur unsichtbar
+  geschaltet. Kaufen (19:04): 17 unsichtbar Len=0, 16 sichtbar Len=14.
+  Zurückkaufen (19:05): 17 sichtbar Len=1, 16 unsichtbar Len=14.
+- FALLE: Wer „die erste Liste“ nimmt, liest auf dem Kaufen-Reiter die leere
+  Rückkaufliste → „Keine Einträge“ (im Log seit mind. 2026-10-04).
+  `FindListInAddon` bevorzugt deshalb die sichtbare Liste.
+- Der Reiterwechsel wird (Stand 2026-10-06) nicht angesagt.
+
 ## Vendor Sell (Gil-Shop) — AccessibleVendorSell (ClientStructs + Community-Pfad, 2026-09-06)
 
 Verkauf an einen normalen NPC-Laden (Addon **`Shop`**, Gil). SpecialShop /
