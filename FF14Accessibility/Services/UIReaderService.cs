@@ -2349,9 +2349,12 @@ public sealed class UIReaderService : IDisposable
     /// cursor straight onto the first row of the new list (log 2026-10-06
     /// 19:30:51, buy row -> buyback row in the same frame as the switch), and
     /// <see cref="PrefixShopTab"/> names the tab in front of that row. An empty
-    /// list has no row to land on, so the tab is spoken here together with the
-    /// game's own empty-list text (Text id=15, "Keine verkaufbaren
-    /// Gegenstände.", dump 2026-10-06). A non-empty list is left to the focus
+    /// list has no row to land on (the cursor goes to a textless node, log
+    /// 2026-10-06 19:40:31), so the tab is spoken here with "Keine Einträge".
+    /// The window shows nothing more: its Text id=15 ("Keine verkaufbaren
+    /// Gegenstände.") is flagged visible on the empty buyback tab, but an
+    /// ancestor stays hidden (dump 19:44:27: Res id=14, same place and size,
+    /// hidden), so it is not drawn. A non-empty list is left to the focus
     /// reader: recording the tab here would take the prefix away from it.
     /// </summary>
     private unsafe void OnShopUpdate(AddonEvent type, AddonArgs args)
@@ -2373,13 +2376,7 @@ public sealed class UIReaderService : IDisposable
         if (count != 0) return;
 
         _lastShopTab = tab;
-        var empty = ReadVisibleTopText(addon, 15);
-        if (empty.Length == 0)
-        {
-            _log.Warning("[Shop] Liste leer, aber Text id=15 nicht sichtbar - allgemeine Ansage.");
-            empty = AccessibilityStrings.NoEntries;
-        }
-        var spoken = $"{tab}. {empty}";
+        var spoken = $"{tab}. {AccessibilityStrings.NoEntries}";
         _log.Info($"[Shop] Reiter (leere Liste): '{spoken}'");
         _tolk.SpeakInterrupt(spoken);
     }
@@ -2410,18 +2407,6 @@ public sealed class UIReaderService : IDisposable
         _log.Info($"[Shop] Reiter gewechselt: '{tab}'");
         if (text.StartsWith(tab, StringComparison.Ordinal)) return text;
         return $"{tab}. {text}";
-    }
-
-    /// <summary>Text of a top-level text node when it and all its parents are
-    /// visible, else "". The gil shop keeps its empty-list text in the tree at
-    /// all times and only shows it when the list is empty.</summary>
-    private static unsafe string ReadVisibleTopText(AtkUnitBase* addon, uint id)
-    {
-        var node = addon->GetNodeById(id);
-        if (node == null || node->Type != NodeType.Text) return string.Empty;
-        for (var cur = node; cur != null; cur = cur->ParentNode)
-            if (!cur->IsVisible()) return string.Empty;
-        return TolkService.Sanitize(AtkText.ReadClean((AtkTextNode*)node)).Trim();
     }
 
     // -- GrandCompanyExchange: Kategorie-Reiter -----------------------

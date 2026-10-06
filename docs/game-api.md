@@ -3077,7 +3077,19 @@ Noch nicht belegt: Preiszeilen-Detail, Kauf, HQ/Menge.
   „Vorrat“ ist also der eigene Taschenbestand, nicht der Lagerbestand des Händlers.
   Text id=8 der Zeile steht unter dieser Überschrift (x=568, Überschrift x=525).
   Der Fokus-Leser verwirft diesen Text, solange er einstellig ist.
-- Der Reiterwechsel wird (Stand 2026-10-06) nicht angesagt.
+- Reiterwechsel (Num7/Num9): das Spiel setzt den Cursor im selben Frame auf die
+  erste Zeile der neuen Liste (Log 2026-10-06 19:39:48-19:40:33). Deshalb setzt
+  `PrefixShopTab` den Reiternamen VOR diese Zeile („Zurückkaufen. 21, …“), statt
+  ihn getrennt zu sagen. Aktiver Reiter = angehakter RadioButton
+  (`ReadCheckedRadioLabel`). Der Start-Reiter beim Öffnen bleibt stumm.
+- Leere Rückkaufliste: der Cursor landet auf einem textlosen Knoten (id=6,
+  Eltern 17:1015, Log 19:40:31), also keine Zeile. `OnShopUpdate` sagt dann
+  „Zurückkaufen. Keine Einträge“. Getestet 2026-10-06, nichts abgeschnitten.
+- FALLE: Text id=15 „Keine verkaufbaren Gegenstände.“ ist auf dem leeren
+  Rückkauf-Reiter selbst sichtbar markiert (F=0x203A), aber ein Vorfahr ist
+  versteckt (Laufzeit-Prüfung 19:40:31; im Dump 19:44:27 Res id=14, gleiche
+  Lage/Größe, F=0x202B ohne Visible). Er wird also nicht gezeichnet und nicht
+  vorgelesen. Eltern-Zuordnung zu id=14 nur aus Lage/Größe geschlossen.
 
 ## Vendor Sell (Gil-Shop) — AccessibleVendorSell (ClientStructs + Community-Pfad, 2026-09-06)
 
