@@ -4502,6 +4502,13 @@ public sealed class UIReaderService : IDisposable
 
         // The price is read here as well, so the announcement and the description
         // come from the same row read - and are never mixed up between rows.
+        // Not in the gil shop (Shop): its rows are laid out differently and its
+        // price is already part of the spoken row text. Buy rows have a Res node
+        // as id=6, buyback rows the QUANTITY ("1" under "Anzahl", price "174" is
+        // id=7) - read as price it became "Preis 1" (dumps 2026-10-06 19:04/19:05,
+        // log 19:04:39). Its currency is gil, which SpecialShop does not carry.
+        if (FindAddonNameForNode(node) == "Shop") return _inventory.ResolveItemIdByName(name);
+
         var priceText = ReadRowText(row, RowPriceNodeId);
         _shopRowPrice = uint.TryParse(priceText, out var price) ? price : 0;
 

@@ -3131,6 +3131,19 @@ Fact Discipline: keine Behauptung über Timing ohne Log.
   `Strg+F9` Aktionsleiste bei Strg+Alt+F9 mit). Kein `Alt+F4` (Windows). Kein
   `Strg+Umschalt+F*` (Accessibility).
 
+## Zeilen-Layout Gil-Händler (`Shop`) vs. Tauschfenster (Dumps 2026-10-06)
+
+- Tauschfenster (derbruedi-Sonde 2026-08-16, Errungenschafts-Händler): Name id=3,
+  Preis id=6, zweite Zahl id=8. Darauf baut `ResolveShopRowItemId` (Preis +
+  Währung aus SpecialShop).
+- Gil-Händler `Shop`, Kaufzeile: Name id=3, Preis id=5 („264“), id=6 ist ein
+  Res-Knoten, id=8 „Vorrat“.
+- Gil-Händler `Shop`, Rückkaufzeile: Name id=3, **id=6 = Anzahl („1“)**, Preis
+  id=7 („174“), id=9 „Vorrat“. Als Preis gelesen wurde daraus „Preis 1“
+  (Log 2026-10-06 19:04:39, auch 2026-10-04 12:40). Deshalb liest
+  `ResolveShopRowItemId` im `Shop` keinen Preis; der Gil-Preis steht schon im
+  gesprochenen Zeilentext, und SpecialShop kennt keine Gil-Läden.
+
 ## Händler-Kategorie (ShopNpcService) — TopicSelect/PreHandler (2026-09-06)
 
 Erkennung weiter nur über Spieldaten (ENpcBase.ENpcData), keine Namen.
