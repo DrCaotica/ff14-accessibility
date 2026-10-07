@@ -677,6 +677,7 @@ public sealed class UIReaderService : IDisposable
         // icon-only controls in the crafting log and the synthesis window.
         _addonLifecycle.RegisterListener(AddonEvent.PostUpdate, "RecipeNote", OnCraftUiProbe);
         _addonLifecycle.RegisterListener(AddonEvent.PostUpdate, "Synthesis",  OnCraftUiProbe);
+        _addonLifecycle.RegisterListener(AddonEvent.PostUpdate, "CraftActionSimulator", OnCraftUiProbe);
 #endif
 
 #if DEBUG
@@ -14258,6 +14259,8 @@ public sealed class UIReaderService : IDisposable
 
     private static readonly uint[] RecipeNoteProbeStateNodes = [13, 14, 15, 16, 17, 18, 19, 20, 21, 33, 34, 35];
     private static readonly uint[] SynthesisProbeStateNodes  = [7, 26, 27, 99, 100];
+    // Planner dump 2026-10-07: radio buttons id=3 Favoriten, 4 Synthese, 5 Veredelung.
+    private static readonly uint[] CraftSimulatorProbeStateNodes = [3, 4, 5];
 
     private unsafe void OnCraftUiProbe(AddonEvent type, AddonArgs args)
     {
@@ -14285,15 +14288,24 @@ public sealed class UIReaderService : IDisposable
                 _log.Info($"[CraftProbe] {name} Tooltip {DescribeProbeChain((AtkResNode*)node)} = '{text}'");
         }
 
-        // 2. Which node each named field points at (once per open).
-        var fields = name == "RecipeNote"
-            ? DescribeRecipeNoteFields(unit, (AddonRecipeNote*)unit)
-            : DescribeSynthesisFields(unit, (AddonSynthesis*)unit);
-        if (CraftProbeChanged(name + ":fields", fields))
+        // 2. Which node each named field points at (once per open). The planner
+        // (CraftActionSimulator) has no ClientStructs struct.
+        var fields = name switch
+        {
+            "RecipeNote" => DescribeRecipeNoteFields(unit, (AddonRecipeNote*)unit),
+            "Synthesis"  => DescribeSynthesisFields(unit, (AddonSynthesis*)unit),
+            _            => string.Empty,
+        };
+        if (fields.Length > 0 && CraftProbeChanged(name + ":fields", fields))
             _log.Info($"[CraftProbe] {name} Felder: {fields}");
 
         // 3. State of the icon-only controls, child by child.
-        var ids = name == "RecipeNote" ? RecipeNoteProbeStateNodes : SynthesisProbeStateNodes;
+        var ids = name switch
+        {
+            "RecipeNote" => RecipeNoteProbeStateNodes,
+            "Synthesis"  => SynthesisProbeStateNodes,
+            _            => CraftSimulatorProbeStateNodes,
+        };
         foreach (var id in ids)
         {
             var state = DescribeProbeNodeState(unit, id);
@@ -14326,7 +14338,10 @@ public sealed class UIReaderService : IDisposable
         for (var up = 0; up < 6 && node != null; up++, node = node->ParentNode)
         {
             var tip = _tooltips.TryGetTooltip(node);
-            parts.Add($"{node->NodeId}({(int)node->Type})" + (tip != null ? $"['{tip}']" : string.Empty));
+            var action = _tooltips.TryGetActionDeep(node, maxDepth: 0);
+            parts.Add($"{node->NodeId}({(int)node->Type})"
+                      + (tip != null ? $"['{tip}']" : string.Empty)
+                      + (action != null ? $"[Action {action.Value.Kind} {action.Value.Id}]" : string.Empty));
         }
         return string.Join(" < ", parts);
     }
