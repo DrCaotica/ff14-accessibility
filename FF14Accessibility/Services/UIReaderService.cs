@@ -14181,7 +14181,7 @@ public sealed class UIReaderService : IDisposable
         // every recipe would be noise, so it only speaks when it is a real value.
         AddRecipeValue(parts, addon->SelectedRecipeStartingQuality, AccessibilityStrings.RecipeStartQuality, skipZero: true);
         AddRecipeValue(parts, addon->SelectedRecipeQuantityCraftableFromMaterialsInInventory, AccessibilityStrings.RecipeCraftable);
-        AddRecipeValue(parts, addon->SelectedRecipeResultQuantityInInventoryNqAndHq, AccessibilityStrings.RecipeInBag);
+        AddRecipeResultInBag(parts, addon->SelectedRecipeResultQuantityInInventoryNqAndHq);
 
 #if DEBUG
         LogRecipeMaterialSources(addon);
@@ -14197,6 +14197,23 @@ public sealed class UIReaderService : IDisposable
         return true;
     }
 
+    /// <summary>
+    /// How many of the result item the bag holds. The window writes NQ and HQ
+    /// as two lines in one node ("2\n1"), which was spoken as "Im Beutel 2 1".
+    /// First line NQ, second HQ (log 2026-10-07: for Ahorn-Bauholz "2\n1", while
+    /// the NQ column of the same item in Bronzespeer showed 2 in the bag and the
+    /// HQ field 1).
+    /// </summary>
+    private static unsafe void AddRecipeResultInBag(List<string> parts, AtkTextNode* node)
+    {
+        var value = AtkText.Read(node).Trim();
+        if (value.Length == 0) return;
+        var lines = value.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        parts.Add(lines.Length == 2
+            ? AccessibilityStrings.RecipeInBagNqHq(lines[0], lines[1])
+            : AccessibilityStrings.RecipeInBag(value));
+    }
+
     /// <summary>Appends one labelled value, skipping nodes the window left empty.</summary>
     private static unsafe void AddRecipeValue(
         List<string> parts, AtkTextNode* node, Func<string, string> label, bool skipZero = false)
@@ -14208,24 +14225,31 @@ public sealed class UIReaderService : IDisposable
     }
 
     /// <summary>
-    /// One line per filled material slot plus the crystals. A slot counts as
-    /// filled when its name node carries text - the window keeps all six slots
-    /// alive and blanks the unused ones (dump 2026-08-08: id=94..90 empty,
-    /// id=89 "Dreckiges Wasser").
+    /// One line per material row the window shows, plus the crystals. A row
+    /// counts only while it is VISIBLE: the window does not blank the rows a
+    /// recipe leaves unused, it hides them and keeps the previous recipe's text.
+    /// Checking the text alone read Fischtran and Bronzebarren (from Bronzespeer)
+    /// into Ahorn-Bauholz, which needs Ahorn-Holzscheit only (log 2026-10-07
+    /// 21:09:01; the game's own entry listed that one ingredient). Rows are read
+    /// by node id, like the focus reader (see RecipeMaterialFirstRowId).
     /// </summary>
     private unsafe List<string> ReadRecipeMaterials(AddonRecipeNote* addon)
     {
         var lines = new List<string>();
+        var unit = &addon->AtkUnitBase;
 
-        foreach (var ing in addon->Ingredients)
+        for (var id = RecipeMaterialFirstRowId; id <= RecipeMaterialLastRowId; id++)
         {
-            var matName = AtkText.ReadClean(ing.Name).Trim();
+            var row = FindTopNode(unit, id);
+            if (row == null || (int)row->Type < 1000 || !row->IsVisible()) continue;
+            var comp = ((AtkComponentNode*)row)->Component;
+            var matName = ReadVisibleChildText(comp, RecipeMaterialNameId, clean: true);
             if (matName.Length == 0) continue;
             lines.Add(AccessibilityStrings.RecipeMaterial(
                 matName,
-                AtkText.Read(ing.QuantityRequiredForCraft).Trim(),
-                AtkText.Read(ing.QuantityInInventoryNq).Trim(),
-                AtkText.Read(ing.QuantityInInventoryHq).Trim()));
+                ReadVisibleChildText(comp, RecipeMaterialNeededId),
+                ReadVisibleChildText(comp, RecipeMaterialNqOwnedId),
+                ReadVisibleChildText(comp, RecipeMaterialHqOwnedId)));
         }
 
         // Crystals are icon-only in this window; read by slot node so the slot
@@ -14683,6 +14707,16 @@ public sealed class UIReaderService : IDisposable
                     + $"need='{AtkText.Read(ing.QuantityRequiredForCraft)}' "
                     + $"nq='{AtkText.Read(ing.QuantityInInventoryNq)}' hq='{AtkText.Read(ing.QuantityInInventoryHq)}'");
             slot++;
+        }
+
+        // Row visibility next to the text: unused rows keep the previous
+        // recipe's text (log 2026-10-07 21:09:01), visibility decides.
+        for (var id = RecipeMaterialFirstRowId; id <= RecipeMaterialLastRowId; id++)
+        {
+            var row = FindTopNode(&addon->AtkUnitBase, id);
+            if (row == null || (int)row->Type < 1000) { _log.Info($"[RecipeMat] Zeile id={id} fehlt"); continue; }
+            var rowName = ReadVisibleChildText(((AtkComponentNode*)row)->Component, RecipeMaterialNameId, clean: true);
+            _log.Info($"[RecipeMat] Zeile id={id} sichtbar={row->IsVisible()} name='{rowName}'");
         }
 
         var game = FFXIVClientStructs.FFXIV.Client.Game.UI.RecipeNote.Instance();

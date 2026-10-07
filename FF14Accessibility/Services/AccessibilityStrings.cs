@@ -4154,6 +4154,9 @@ public static partial class AccessibilityStrings
     /// <summary>How many of the RESULT item the player already owns.</summary>
     public static string RecipeInBag(string value) =>
         IsGerman ? $"Im Beutel {value}" : $"In bag {value}";
+    /// <summary>Result item in the bag, split by quality as the window shows it.</summary>
+    public static string RecipeInBagNqHq(string nq, string hq) =>
+        IsGerman ? $"Im Beutel {nq} NQ, {hq} HQ" : $"In bag {nq} NQ, {hq} HQ";
     /// <summary>One material line. NQ and HQ are always both named (user decision
     /// 2026-08-08): HQ material raises starting quality, so a silent zero would
     /// hide a real choice.</summary>
