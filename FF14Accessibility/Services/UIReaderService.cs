@@ -3662,6 +3662,14 @@ public sealed class UIReaderService : IDisposable
             // window carries its own label node for exactly this field.
             text = recipeSearch;
         }
+        else if (TryReadRecipeNoteDetailFocus(node, out var recipeDetail))
+        {
+            // Crafting log detail pane: crystal slots and the NQ/HQ columns of
+            // the material rows, with the window's own numbers. The generic
+            // reader said "438" or nothing on a crystal and "name, Auswählen"
+            // on both columns (log 2026-10-07 20:44:56 - 20:45:09).
+            text = recipeDetail;
+        }
         else if (TryReadSynthesisFocus(node, out var synthesisText))
         {
             // Synthesis window: the item icon and the effect-list toggle carry
@@ -13468,6 +13476,158 @@ public sealed class UIReaderService : IDisposable
         return text.Length > 0;
     }
 
+    // Detail pane of the crafting log, dump 2026-10-07 19:40 (recipe Bronzespeer,
+    // two crystals, three materials):
+    //   - crystal slots id=82 (left) and id=83 (right), Button components; child
+    //     Text id=2 = amount needed, id=3 = amount in the bag (chat the same
+    //     evening: one Windscherbe used, id=3 of id=82 went 442 -> 438).
+    //     Left/right are the Recipe sheet's crystal slots 6/7: the dump's icons
+    //     020004/020003 are Windscherbe/Eisscherbe (Item.Icon), exactly slots 6/7
+    //     of recipe 1017 Bronzespeer (offline sqpack 2026-10-07).
+    //   - material rows id=89 (top) .. id=94, Comp 1039, in the sheet's slot
+    //     order 0..5 (dump: 89/90/91 = Ahorn-Bauholz/Fischtran/Bronzebarren =
+    //     slots 0/1/2 of recipe 1017). Inside a row: name id=18 (item link),
+    //     needed id=4, NQ column = button id=11 (its Text id=2 = amount taken)
+    //     over Text id=12 (amount in the bag), HQ column = button id=14 / id=15.
+    // The cursor reaches the crystal collision (id=6 in 82/83) and, per row, the
+    // icon button id=5 and the two column buttons (probe 2026-10-07 20:45). The
+    // icon button stays with the item reader (name, category, description).
+    private static readonly uint[] RecipeCrystalSlotIds = [82, 83];
+    private const int  RecipeCrystalFirstSheetSlot = 6;
+    private const uint RecipeMaterialFirstRowId    = 89;
+    private const uint RecipeMaterialLastRowId     = 94;
+    private const uint RecipeMaterialNameId        = 18;
+    private const uint RecipeMaterialNeededId      = 4;
+    private const uint RecipeMaterialNqButtonId    = 11;
+    private const uint RecipeMaterialNqOwnedId     = 12;
+    private const uint RecipeMaterialHqButtonId    = 14;
+    private const uint RecipeMaterialHqOwnedId     = 15;
+    private const uint RecipeMaterialChosenTextId  = 2;
+
+    // Last reason a crystal could not be named - the reader runs every frame,
+    // the log line only when the reason changes.
+    private string _lastCrystalNameProblem = string.Empty;
+
+    /// <summary>
+    /// Speaks the crafting log's crystal slots and the NQ/HQ columns of its
+    /// material rows. Before, a crystal slot said only its bag count ("438") or
+    /// nothing, and both columns of a row said "name, Auswählen" - the same
+    /// words for NQ and HQ, without any of the three numbers the window shows
+    /// (log 2026-10-07 20:44:56 - 20:45:09).
+    /// </summary>
+    private unsafe bool TryReadRecipeNoteDetailFocus(AtkResNode* focused, out string text)
+    {
+        text = string.Empty;
+        var ptr = _gameGui.GetAddonByName("RecipeNote");
+        if (ptr.IsNull) return false;
+        var addon = (AddonRecipeNote*)(nint)ptr;
+        var unit = &addon->AtkUnitBase;
+        if (!unit->IsVisible || !IsNodeInAddon(focused, unit)) return false;
+
+        for (var slot = 0; slot < RecipeCrystalSlotIds.Length; slot++)
+        {
+            var crystal = FindTopNode(unit, RecipeCrystalSlotIds[slot]);
+            if (crystal == null || !IsNodeUnder(focused, crystal)) continue;
+            text = DescribeRecipeCrystal(addon, slot) ?? AccessibilityStrings.RecipeCrystalEmpty;
+            return true;
+        }
+
+        // Material row: which column button the focus sits in, and the row it
+        // belongs to. The row has to be the window's own top-level node of that
+        // id, so a nested node that happens to share the number cannot match.
+        uint column = 0;
+        AtkComponentNode* row = null;
+        var n = focused;
+        for (var up = 0; up < 6 && n != null; up++, n = n->ParentNode)
+        {
+            if ((int)n->Type < 1000) continue;
+            if (column == 0 && n->NodeId is RecipeMaterialNqButtonId or RecipeMaterialHqButtonId)
+                column = n->NodeId;
+            if (n->NodeId is >= RecipeMaterialFirstRowId and <= RecipeMaterialLastRowId
+                && FindTopNode(unit, n->NodeId) == n)
+            {
+                row = (AtkComponentNode*)n;
+                break;
+            }
+        }
+        if (row == null || column == 0) return false;
+
+        var comp = row->Component;
+        var name = ReadVisibleChildText(comp, RecipeMaterialNameId, clean: true);
+        if (name.Length == 0) return false;
+
+        var hq = column == RecipeMaterialHqButtonId;
+        var button = FindChildNode(comp, column);
+        var chosen = button != null && (int)button->Type >= 1000
+            ? ReadVisibleChildText(((AtkComponentNode*)button)->Component, RecipeMaterialChosenTextId)
+            : string.Empty;
+        var owned  = ReadVisibleChildText(comp, hq ? RecipeMaterialHqOwnedId : RecipeMaterialNqOwnedId);
+        var needed = ReadVisibleChildText(comp, RecipeMaterialNeededId);
+        text = AccessibilityStrings.RecipeMaterialColumn(name, hq, chosen, owned, needed);
+        return true;
+    }
+
+    /// <summary>
+    /// One crystal slot of the detail pane as a sentence, or null when the
+    /// selected recipe leaves the slot unused (the window blanks its amount -
+    /// log 2026-10-07 20:45:05, Ahorn-Bauholz needs one crystal type only).
+    /// </summary>
+    private unsafe string? DescribeRecipeCrystal(AddonRecipeNote* addon, int slot)
+    {
+        var comp = FindTopComponent(&addon->AtkUnitBase, RecipeCrystalSlotIds[slot]);
+        var needed = ReadVisibleChildText(comp, 2);
+        if (needed.Length == 0 || needed == "0") return null;
+        var owned = ReadVisibleChildText(comp, 3);
+        return AccessibilityStrings.RecipeCrystal(ResolveRecipeCrystalName(addon, slot, needed), needed, owned);
+    }
+
+    /// <summary>
+    /// Name of the crystal in a detail-pane slot. The window draws crystals as
+    /// icons only, so the name comes from the Recipe sheet row of the selected
+    /// recipe - the same join RecipeCraftService uses (RecipeEntry.RecipeId is
+    /// the sheet RowId). The join is trusted only when the sheet row agrees with
+    /// what the window shows: its result item carries the displayed recipe name,
+    /// and its crystal slot needs the displayed amount. Otherwise the slot stays
+    /// unnamed and the reason is logged.
+    /// </summary>
+    private unsafe string ResolveRecipeCrystalName(AddonRecipeNote* addon, int slot, string needed)
+    {
+        var problem = string.Empty;
+        var name = string.Empty;
+
+        var note = FFXIVClientStructs.FFXIV.Client.Game.UI.RecipeNote.Instance();
+        var entry = note != null && note->RecipeList != null ? note->RecipeList->SelectedRecipe : null;
+        var shown = AtkText.ReadClean(addon->SelectedRecipeName).Trim();
+        if (entry == null)
+        {
+            problem = "kein SelectedRecipe";
+        }
+        else if (!_data.GetExcelSheet<Lumina.Excel.Sheets.Recipe>().TryGetRow(entry->RecipeId, out var recipe))
+        {
+            problem = $"Rezept {entry->RecipeId} fehlt im Recipe-Sheet";
+        }
+        else
+        {
+            var result = _inventory.ResolveItemName(recipe.ItemResult.RowId);
+            var sheetSlot = RecipeCrystalFirstSheetSlot + slot;
+            var itemId = sheetSlot < recipe.Ingredient.Count ? recipe.Ingredient[sheetSlot].RowId : 0;
+            var amount = sheetSlot < recipe.AmountIngredient.Count ? recipe.AmountIngredient[sheetSlot] : 0;
+            if (result != shown)
+                problem = $"Rezept {entry->RecipeId} ergibt '{result}', Fenster zeigt '{shown}'";
+            else if (itemId == 0 || amount.ToString() != needed)
+                problem = $"Rezept {entry->RecipeId} Slot {sheetSlot}: Item {itemId} x{amount}, Fenster zeigt {needed}";
+            else
+                name = _inventory.ResolveItemName(itemId);
+        }
+
+        if (problem != _lastCrystalNameProblem)
+        {
+            _lastCrystalNameProblem = problem;
+            if (problem.Length > 0) _log.Info($"[Recipe] Kristallname nicht belegt ({problem}) - ohne Namen angesagt.");
+        }
+        return name;
+    }
+
     /// <summary>True when <paramref name="node"/> sits anywhere in the addon's node tree.</summary>
     private static unsafe bool IsNodeInAddon(AtkResNode* node, AtkUnitBase* addon)
         => addon != null && IsNodeUnder(node, addon->RootNode);
@@ -13987,7 +14147,7 @@ public sealed class UIReaderService : IDisposable
     /// alive and blanks the unused ones (dump 2026-08-08: id=94..90 empty,
     /// id=89 "Dreckiges Wasser").
     /// </summary>
-    private static unsafe List<string> ReadRecipeMaterials(AddonRecipeNote* addon)
+    private unsafe List<string> ReadRecipeMaterials(AddonRecipeNote* addon)
     {
         var lines = new List<string>();
 
@@ -14002,14 +14162,12 @@ public sealed class UIReaderService : IDisposable
                 AtkText.Read(ing.QuantityInInventoryHq).Trim()));
         }
 
-        // Crystals are icon-only in this window - CrystalNodes carries Image but
-        // no name node, so the element is announced unnamed rather than guessed.
-        foreach (var crystal in addon->Crystals)
+        // Crystals are icon-only in this window; read by slot node so the slot
+        // index lines up with the sheet's crystal slots (see RecipeCrystalSlotIds).
+        for (var slot = 0; slot < RecipeCrystalSlotIds.Length; slot++)
         {
-            var needed = AtkText.Read(crystal.QuantityRequiredForCraft).Trim();
-            if (needed.Length == 0 || needed == "0") continue;
-            lines.Add(AccessibilityStrings.RecipeCrystal(
-                needed, AtkText.Read(crystal.QuantityInInventory).Trim()));
+            var line = DescribeRecipeCrystal(addon, slot);
+            if (line != null) lines.Add(line);
         }
 
         return lines;

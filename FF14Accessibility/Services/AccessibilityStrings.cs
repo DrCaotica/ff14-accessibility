@@ -4160,12 +4160,27 @@ public static partial class AccessibilityStrings
     public static string RecipeMaterial(string name, string needed, string nq, string hq) =>
         IsGerman ? $"{name}, {needed} benötigt, {nq} NQ, {hq} HQ"
                  : $"{name}, {needed} needed, {nq} NQ, {hq} HQ";
-    /// <summary>A crystal row. The window shows crystals as icons only - it
-    /// carries no name node (ilspycmd 2026-08-08: CrystalNodes has Image but no
-    /// Name), so the element stays unnamed rather than guessed.</summary>
-    public static string RecipeCrystal(string needed, string owned) =>
-        IsGerman ? $"Kristall, {needed} benötigt, {owned} im Beutel"
-                 : $"Crystal, {needed} needed, {owned} in bag";
+    /// <summary>A crystal slot. The window shows crystals as icons only, so the
+    /// name comes from the recipe's own data; when that join cannot be confirmed
+    /// the slot is called "crystal" rather than given a guessed name.</summary>
+    public static string RecipeCrystal(string name, string needed, string owned)
+    {
+        if (name.Length == 0) name = IsGerman ? "Kristall" : "Crystal";
+        return IsGerman ? $"{name}, {needed} benötigt, {owned} im Beutel"
+                        : $"{name}, {needed} needed, {owned} in bag";
+    }
+    /// <summary>A crystal slot the selected recipe does not use.</summary>
+    public static string RecipeCrystalEmpty =>
+        IsGerman ? "Kristall-Platz, leer" : "Crystal slot, empty";
+    /// <summary>The NQ or HQ column of one material row: how many of that
+    /// quality are taken for the craft, how many the bag holds, how many the
+    /// recipe needs in total.</summary>
+    public static string RecipeMaterialColumn(string name, bool hq, string chosen, string owned, string needed)
+    {
+        var quality = hq ? "HQ" : "NQ";
+        return IsGerman ? $"{name}, {quality}: {chosen} gewählt, {owned} im Beutel, {needed} benötigt"
+                        : $"{name}, {quality}: {chosen} chosen, {owned} in bag, {needed} needed";
+    }
     /// <summary>Said instead of the values when no recipe is selected yet.</summary>
     public static string RecipeNoSelection =>
         IsGerman ? "Kein Rezept ausgewählt." : "No recipe selected.";
