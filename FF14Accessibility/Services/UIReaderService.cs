@@ -14271,6 +14271,9 @@ public sealed class UIReaderService : IDisposable
                 _craftProbeLast.Remove(key);
             return;
         }
+        // The first PostUpdate arrives before OnSetup (same as Character, see
+        // OnCharacterUpdate); nothing in the window is built yet.
+        if (!unit->IsReady) return;
 
         // 1. Tooltip bindings the game made for this window.
         var bindings = _tooltips.BindingsForAddon(unit->Id);
@@ -14284,8 +14287,8 @@ public sealed class UIReaderService : IDisposable
 
         // 2. Which node each named field points at (once per open).
         var fields = name == "RecipeNote"
-            ? DescribeRecipeNoteFields((AddonRecipeNote*)unit)
-            : DescribeSynthesisFields((AddonSynthesis*)unit);
+            ? DescribeRecipeNoteFields(unit, (AddonRecipeNote*)unit)
+            : DescribeSynthesisFields(unit, (AddonSynthesis*)unit);
         if (CraftProbeChanged(name + ":fields", fields))
             _log.Info($"[CraftProbe] {name} Felder: {fields}");
 
@@ -14328,31 +14331,51 @@ public sealed class UIReaderService : IDisposable
         return string.Join(" < ", parts);
     }
 
-    private static unsafe uint ProbeOwnerId(AtkComponentBase* comp) =>
-        comp != null && comp->OwnerNode != null ? comp->OwnerNode->AtkResNode.NodeId : 0;
+    /// <summary>
+    /// Node id of the top-level node a named field points at, found by comparing
+    /// ADDRESSES against the window's own node list - the field itself is never
+    /// dereferenced. The first version followed the pointers and crashed the game
+    /// on opening the crafting log (dalamud_appcrash_20261007_200358, access
+    /// violation in DescribeRecipeNoteFields): an unverified field pointer must
+    /// not be walked. "?" = no node of this window sits at that address, i.e. the
+    /// field does not match this game version.
+    /// </summary>
+    private static unsafe string ProbeFieldNode(AtkUnitBase* unit, void* field)
+    {
+        if (field == null) return "null";
+        for (var i = 0; i < unit->UldManager.NodeListCount; i++)
+        {
+            var n = unit->UldManager.NodeList[i];
+            if (n == null) continue;
+            if (n == field) return n->NodeId.ToString();
+            if ((int)n->Type >= 1000 && ((AtkComponentNode*)n)->Component == field) return n->NodeId.ToString();
+        }
+        return "?";
+    }
 
-    private static unsafe string DescribeRecipeNoteFields(AddonRecipeNote* a) =>
-        $"Probe={ProbeOwnerId((AtkComponentBase*)a->TrialSynthesisButton)} "
-        + $"Eil={ProbeOwnerId((AtkComponentBase*)a->QuickSynthesisButton)} "
-        + $"Synthese={ProbeOwnerId((AtkComponentBase*)a->SynthesizeButton)} "
-        + $"KatZurueck={ProbeOwnerId((AtkComponentBase*)a->PreviousCategoryButton)} "
-        + $"KatVor={ProbeOwnerId((AtkComponentBase*)a->NextCategoryButton)} "
-        + $"SeiteZurueck={ProbeOwnerId((AtkComponentBase*)a->PreviousPageButton)} "
-        + $"SeiteVor={ProbeOwnerId((AtkComponentBase*)a->NextPageButton)} "
-        + $"Filter={ProbeOwnerId((AtkComponentBase*)a->RecipeFilterButton)} "
-        + $"Kategorie={ProbeOwnerId((AtkComponentBase*)a->CategoryDropDown)} "
-        + $"Rezeptliste={ProbeOwnerId((AtkComponentBase*)a->RecipeList)} "
-        + $"NQ={ProbeOwnerId((AtkComponentBase*)a->NqFillButton)} "
-        + $"HQ={ProbeOwnerId((AtkComponentBase*)a->HqFillButton)} "
-        + $"Seitentext='{AtkText.ReadClean(a->PaginationText).Trim()}' "
-        + $"Stufenwort='{AtkText.ReadClean(a->RecipeLevelLiteral).Trim()}'";
+    private static unsafe string DescribeRecipeNoteFields(AtkUnitBase* u, AddonRecipeNote* a) =>
+        $"Probe={ProbeFieldNode(u, a->TrialSynthesisButton)} "
+        + $"Eil={ProbeFieldNode(u, a->QuickSynthesisButton)} "
+        + $"Synthese={ProbeFieldNode(u, a->SynthesizeButton)} "
+        + $"KatZurueck={ProbeFieldNode(u, a->PreviousCategoryButton)} "
+        + $"KatVor={ProbeFieldNode(u, a->NextCategoryButton)} "
+        + $"SeiteZurueck={ProbeFieldNode(u, a->PreviousPageButton)} "
+        + $"SeiteVor={ProbeFieldNode(u, a->NextPageButton)} "
+        + $"Filter={ProbeFieldNode(u, a->RecipeFilterButton)} "
+        + $"Kategorie={ProbeFieldNode(u, a->CategoryDropDown)} "
+        + $"Rezeptliste={ProbeFieldNode(u, a->RecipeList)} "
+        + $"NQ={ProbeFieldNode(u, a->NqFillButton)} "
+        + $"HQ={ProbeFieldNode(u, a->HqFillButton)} "
+        + $"Seitentext={ProbeFieldNode(u, a->PaginationText)} "
+        + $"Herstellbar={ProbeFieldNode(u, a->SelectedRecipeQuantityCraftableFromMaterialsInInventory)} "
+        + $"Rezeptname={ProbeFieldNode(u, a->SelectedRecipeName)}";
 
-    private static unsafe string DescribeSynthesisFields(AddonSynthesis* a) =>
-        $"Abbrechen={ProbeOwnerId((AtkComponentBase*)a->QuitButton)} "
-        + $"Planer={ProbeOwnerId((AtkComponentBase*)a->CalculationsButton)} "
-        + $"Icon={ProbeOwnerId((AtkComponentBase*)a->ItemIcon)} "
-        + $"Verstaerkungen={ProbeOwnerId((AtkComponentBase*)a->ToggleCraftEffectPane)} "
-        + $"Ueberlauf='{AtkText.ReadClean(a->CraftEffectOverflow).Trim()}'";
+    private static unsafe string DescribeSynthesisFields(AtkUnitBase* u, AddonSynthesis* a) =>
+        $"Abbrechen={ProbeFieldNode(u, a->QuitButton)} "
+        + $"Planer={ProbeFieldNode(u, a->CalculationsButton)} "
+        + $"Icon={ProbeFieldNode(u, a->ItemIcon)} "
+        + $"Verstaerkungen={ProbeFieldNode(u, a->ToggleCraftEffectPane)} "
+        + $"Zustand={ProbeFieldNode(u, a->Condition)}";
 
     /// <summary>Visibility of the node and, for a component, checked state plus
     /// every child's id, type, visibility and texture part.</summary>
