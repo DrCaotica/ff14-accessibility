@@ -3146,3 +3146,46 @@ Erkennung weiter nur über Spieldaten (ENpcBase.ENpcData), keine Namen.
 
 Offline-Zählung sqpack EN: +~186 NPCs nur über Indirection, ~666 schon direkt.
 
+
+## Handwerk: Notizbuch, Synthese-Fenster, Synthese-Planer (Dumps + Messung 2026-10-07)
+
+Quellen: Desktop-Dumps FFXIV_UI_Dump_Notizbuch.txt (RecipeNote), FFXIV_UI_Dump_Planer.txt
+(Synthesis), "FFXIV_UI_Dump_planer (2).txt" (Synthesis + CraftActionSimulator), Debug-Messung
+[CraftProbe] im dalamud.log 2026-10-07 20:08-20:40.
+
+**RecipeNote (Handwerker-Notizbuch)**
+- Stufenbereiche (TreeList id=39): das Spiel listet den hoeheren Bereich OBEN ("6-10" y=355
+  ueber "1-5" y=375). Kein Mod-Fehler.
+- Reiter = RadioButtons id=13..20 (8 Handwerksklassen) und id=21 (Rezeptsuche), nur Bilder.
+  Namen als Text-Tooltip auf dem Collision-Kind id=7 (AttachTooltip beim Aufbau).
+  Num9 = Reiter Rezeptsuche (Cursor springt im selben Frame ins Suchfeld id=26),
+  Num7 = zurueck. Cursor erreicht die Reiter nicht.
+- Umschaltknopf id=34 (Button, 2 Bildhaelften, unter "Rezepte"): kein Tooltip, Num0 aendert
+  nichts. Bedeutung UNBEKANNT. Im Suchmodus statt dessen id=33 (Tooltip "Zuletzt gesucht").
+- Feld -> Knoten (Adressvergleich): Probe=102 Eil=103 Synthese=104 KatZurueck=43 KatVor=44
+  SeiteZurueck=46 SeiteVor=47 Filter=56 Kategorie=42 Rezeptliste=45 NQ=85 HQ=86
+  Seitentext=48 Herstellbar=78 Rezeptname=63.
+- Rezeptzeilen tragen kein Material-Zeichen. "Herstellbar" (id=78) gilt fuer das Rezept im
+  Detailbereich; der Detailbereich FOLGT dem Cursor (Test 20:37: Name im Detail = Zeile bei
+  jedem Schritt, Zahl wechselt mit: 2, 2, 0, 0).
+- Kristall-Plaetze id=82/83 (Button 1016): Text id=2 = benoetigt, id=3 = Bestand; Fokus sagt
+  nur den Bestand bzw. nichts, kein Name (offen).
+
+**Synthesis (Synthese-Fenster)**
+- Collision id=49 (Eltern Res id=46) liegt auf dem Gegenstandsbild, Name = AddonSynthesis.ItemName.
+- CheckBox id=7 klappt die Liste aktiver Verstaerkungen auf (Res id=26/27 sichtbar). Ohne
+  aktive Verstaerkung bleibt die Liste leer (Effekt-Slots id=29..37 unsichtbar) - sichtbar
+  aendert sich dann nichts.
+- ClientStructs-Feld ToggleCraftEffectPane zeigt in dieser Version auf Text id=24
+  ("Benoetigter Sammlerwert") - NICHT benutzen.
+- Synthese-Planer-Knopf = id=39 (CalculationsButton), Abbrechen = id=40 (QuitButton).
+
+**CraftActionSimulator (Synthese-Planer)**
+- Reiter RadioButtons id=3 Favoriten, 4 Synthese, 5 Veredelung (mit Text), Num7/Num9 wechseln.
+- Liste id=6; Zeile = Icon + EIN Text (Wirkung oder "Noch nicht erlernt."), der andere Text
+  ist ueber den Eltern-Res versteckt. Kein Aktionsname, keine Tooltip-/Aktionsbindung.
+- AgentCraftActionSimulator.Progress / .Quality (StdVector<EfficiencyCalculation>: BaseActionId,
+  ActionId, Effizienz, Zuwachs, ActionStatus) = Zeilen der Reiter Synthese (8) und Veredelung
+  (13). ActionId -> CraftAction-Sheet (Action-Sheet hat diese Ids nicht). Zuordnung Zeile ->
+  Aktion ueber Icon (AtkComponentIcon.IconId == CraftAction.Icon), Test 20:38 alle Zeilen richtig.
+- Nach Reiterwechsel zeigt die Liste einen Frame lang noch den alten Reiter.
