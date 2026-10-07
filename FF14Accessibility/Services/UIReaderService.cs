@@ -4862,8 +4862,17 @@ public sealed class UIReaderService : IDisposable
                     _itemDeferBudget = ItemDeferMaxFrames;
                 }
                 var deferExhausted = _itemDeferFrames >= _itemDeferBudget;
-                var agentItemId    = _itemSlots.TryResolve(comp, icon->IconId, _lastSpokenSlotItemId,
-                                                           deferExhausted, out var agentWait);
+                // Crafting log material rows know their item without asking the
+                // agent or the picture: the selected recipe lists it. The agent
+                // did not always answer there, and the picture fallback then
+                // named Weichsilber-Barren for Bronzebarren (same icon 20803,
+                // log 2026-10-07 21:01:59).
+                var recipeItemId = ResolveRecipeMaterialItemId((AtkResNode*)cur);
+                var agentWait    = SlotWait.None;
+                var agentItemId  = recipeItemId != 0
+                    ? recipeItemId
+                    : _itemSlots.TryResolve(comp, icon->IconId, _lastSpokenSlotItemId,
+                                            deferExhausted, out agentWait);
                 if (agentItemId == 0 && agentWait != SlotWait.None && !deferExhausted)
                 {
                     // A window that has not opened its detail yet needs the long
@@ -4935,7 +4944,7 @@ public sealed class UIReaderService : IDisposable
                     }
                 }
 
-                _log.Info($"[Focus] Item-Slot iconId={icon->IconId} qty='{qty}' name='{name}' basics='{basics}' gear='{gear}' klassen='{owners}' set={set.Length > 0} cond='{condition}' via={conditionSource}");
+                _log.Info($"[Focus] Item-Slot iconId={icon->IconId} qty='{qty}' name='{name}' basics='{basics}' gear='{gear}' klassen='{owners}' set={set.Length > 0} cond='{condition}' via={conditionSource} rezept={recipeItemId != 0}");
                 var spoken = qty.Length > 0 ? AccessibilityStrings.ItemQuantity(qty, name) : name;
                 // HQ, which a sighted player reads off the symbol drawn on the slot.
                 // Without it the two Honey stacks in the bag were the SAME sentence
@@ -13565,6 +13574,63 @@ public sealed class UIReaderService : IDisposable
         var needed = ReadVisibleChildText(comp, RecipeMaterialNeededId);
         text = AccessibilityStrings.RecipeMaterialColumn(name, hq, chosen, owned, needed);
         return true;
+    }
+
+    // Icon button of a material row (id=5, Comp 1020; probe 2026-10-07 20:45).
+    private const uint RecipeMaterialIconButtonId = 5;
+    private string _lastMaterialItemProblem = string.Empty;
+
+    /// <summary>
+    /// Item id behind a material row's icon button in the crafting log, or 0
+    /// when <paramref name="slotNode"/> is not such a button. Taken from the
+    /// selected recipe's own ingredient list (RecipeEntry.Ingredients - the list
+    /// the window shows, see RecipeCraftService), row id=89 + n = entry n (dump
+    /// 2026-10-07, see RecipeCrystalSlotIds). Trusted only when that item's name
+    /// is the name the row displays; otherwise 0, the reason is logged, and the
+    /// caller falls back to its usual resolution.
+    /// </summary>
+    private unsafe uint ResolveRecipeMaterialItemId(AtkResNode* slotNode)
+    {
+        if (slotNode == null || slotNode->NodeId != RecipeMaterialIconButtonId) return 0;
+        var row = slotNode->ParentNode;
+        if (row == null || (int)row->Type < 1000
+            || row->NodeId is < RecipeMaterialFirstRowId or > RecipeMaterialLastRowId) return 0;
+
+        var ptr = _gameGui.GetAddonByName("RecipeNote");
+        if (ptr.IsNull) return 0;
+        var unit = (AtkUnitBase*)(nint)ptr;
+        if (!unit->IsVisible || FindTopNode(unit, row->NodeId) != row) return 0;
+
+        var problem = string.Empty;
+        uint itemId = 0;
+        var shown = ReadVisibleChildText(((AtkComponentNode*)row)->Component, RecipeMaterialNameId, clean: true);
+        var note = FFXIVClientStructs.FFXIV.Client.Game.UI.RecipeNote.Instance();
+        var entry = note != null && note->RecipeList != null ? note->RecipeList->SelectedRecipe : null;
+        var slot = (int)(row->NodeId - RecipeMaterialFirstRowId);
+        if (entry == null)
+        {
+            problem = "kein SelectedRecipe";
+        }
+        else if (slot >= entry->Ingredients.Length)
+        {
+            problem = $"Slot {slot} ausserhalb der Zutatenliste";
+        }
+        else
+        {
+            var candidate = entry->Ingredients[slot].ItemId;
+            var name = candidate != 0 ? _inventory.ResolveItemName(candidate) : string.Empty;
+            if (candidate == 0 || name != shown)
+                problem = $"Rezept {entry->RecipeId} Slot {slot}: Item {candidate} '{name}', Zeile zeigt '{shown}'";
+            else
+                itemId = candidate;
+        }
+
+        if (problem != _lastMaterialItemProblem)
+        {
+            _lastMaterialItemProblem = problem;
+            if (problem.Length > 0) _log.Info($"[Recipe] Material-Symbol nicht belegt ({problem}) - normale Aufloesung.");
+        }
+        return itemId;
     }
 
     /// <summary>
