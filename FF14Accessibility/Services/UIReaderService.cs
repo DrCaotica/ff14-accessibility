@@ -14198,20 +14198,23 @@ public sealed class UIReaderService : IDisposable
     }
 
     /// <summary>
-    /// How many of the result item the bag holds. The window writes NQ and HQ
-    /// as two lines in one node ("2\n1"), which was spoken as "Im Beutel 2 1".
-    /// First line NQ, second HQ (log 2026-10-07: for Ahorn-Bauholz "2\n1", while
-    /// the NQ column of the same item in Bronzespeer showed 2 in the bag and the
-    /// HQ field 1).
+    /// How many of the result item the bag holds. The window writes both
+    /// qualities into one node, "2\r1" (raw log 2026-10-07 21:12:15): the
+    /// NQ count, a line break, then the HQ count behind the game's HQ glyph
+    /// (SeIconChar.HighQuality = 0xE03C, Dalamud.dll). Spoken raw it came out as
+    /// "Im Beutel 2 1", the glyph being stripped at speech. The glyph is what
+    /// marks the HQ part; without exactly that shape the value is said as it is.
     /// </summary>
     private static unsafe void AddRecipeResultInBag(List<string> parts, AtkTextNode* node)
     {
         var value = AtkText.Read(node).Trim();
         if (value.Length == 0) return;
-        var lines = value.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-        parts.Add(lines.Length == 2
-            ? AccessibilityStrings.RecipeInBagNqHq(lines[0], lines[1])
-            : AccessibilityStrings.RecipeInBag(value));
+        var hqGlyph = (char)Dalamud.Game.Text.SeIconChar.HighQuality;
+        var lines = value.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        if (lines.Length == 2 && !lines[0].Contains(hqGlyph) && lines[1].Contains(hqGlyph))
+            parts.Add(AccessibilityStrings.RecipeInBagNqHq(lines[0], lines[1].Replace(hqGlyph.ToString(), string.Empty).Trim()));
+        else
+            parts.Add(AccessibilityStrings.RecipeInBag(value));
     }
 
     /// <summary>Appends one labelled value, skipping nodes the window left empty.</summary>
