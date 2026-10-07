@@ -135,6 +135,27 @@ public sealed unsafe class TooltipService : IDisposable
         return null;
     }
 
+#if DEBUG
+    /// <summary>
+    /// Every binding the game made for one addon, text and action alike. Debug
+    /// audit only: lets a probe list what a window's icon-only buttons are
+    /// called before a reader relies on any of them.
+    /// </summary>
+    public List<(nint Node, string Text)> BindingsForAddon(ushort addonId)
+    {
+        var result = new List<(nint, string)>();
+        foreach (var pair in _addonOf)
+        {
+            if (pair.Value != addonId) continue;
+            if (_byNode.TryGetValue(pair.Key, out var text))
+                result.Add((pair.Key, text));
+            else if (_actionByNode.TryGetValue(pair.Key, out var action))
+                result.Add((pair.Key, $"<Action {action.Kind} {action.Id}>"));
+        }
+        return result;
+    }
+#endif
+
     private void OnAttach(
         AtkTooltipManager* self, AtkTooltipType type, ushort parentId,
         AtkResNode* targetNode, AtkTooltipManager.AtkTooltipArgs* args)

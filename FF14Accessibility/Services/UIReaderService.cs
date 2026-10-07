@@ -672,6 +672,11 @@ public sealed class UIReaderService : IDisposable
         // Debug audit probe: pin which state follows keyboard navigation in the
         // crafting log (focused node vs. the agent's own indices).
         _addonLifecycle.RegisterListener(AddonEvent.PostUpdate, "RecipeNote", OnRecipeNoteProbe);
+
+        // Debug audit probe: names, states and field-to-node mapping of the
+        // icon-only controls in the crafting log and the synthesis window.
+        _addonLifecycle.RegisterListener(AddonEvent.PostUpdate, "RecipeNote", OnCraftUiProbe);
+        _addonLifecycle.RegisterListener(AddonEvent.PostUpdate, "Synthesis",  OnCraftUiProbe);
 #endif
 
 #if DEBUG
@@ -14239,6 +14244,146 @@ public sealed class UIReaderService : IDisposable
         if (line == _lastRecipeProbe) return;
         _lastRecipeProbe = line;
         _log.Info($"[RecipeProbe] {line}");
+    }
+
+    // Debug audit probe for the crafting windows (2026-10-07). The dumps of
+    // RecipeNote and Synthesis show several controls with no text at all: the
+    // two-part toggle under "Rezepte" (id=34, siblings id=33/35 hidden), the
+    // nine radio buttons at the top (id=13..21), the effect-pane checkbox (id=7)
+    // and the item icon (collision id=49). What they are called, which state
+    // they show and which named ClientStructs field owns which node cannot be
+    // read from a dump - it is logged here, every block only when it changes.
+    // Compiled out of release; remove once pinned.
+    private readonly Dictionary<string, string> _craftProbeLast = new();
+
+    private static readonly uint[] RecipeNoteProbeStateNodes = [13, 14, 15, 16, 17, 18, 19, 20, 21, 33, 34, 35];
+    private static readonly uint[] SynthesisProbeStateNodes  = [7, 26, 27, 99, 100];
+
+    private unsafe void OnCraftUiProbe(AddonEvent type, AddonArgs args)
+    {
+        var unit = (AtkUnitBase*)(nint)args.Addon;
+        if (unit == null) return;
+        var name = args.AddonName;
+        if (!unit->IsVisible)
+        {
+            // Next open logs everything again.
+            foreach (var key in _craftProbeLast.Keys.Where(k => k.StartsWith(name + ":")).ToList())
+                _craftProbeLast.Remove(key);
+            return;
+        }
+
+        // 1. Tooltip bindings the game made for this window.
+        var bindings = _tooltips.BindingsForAddon(unit->Id);
+        var bindSig = string.Join("|", bindings.Select(b => $"{b.Node:X}={b.Text}").OrderBy(s => s));
+        if (CraftProbeChanged(name + ":tooltips", bindSig))
+        {
+            _log.Info($"[CraftProbe] {name}: {bindings.Count} Tooltip-Bindungen");
+            foreach (var (node, text) in bindings)
+                _log.Info($"[CraftProbe] {name} Tooltip {DescribeProbeChain((AtkResNode*)node)} = '{text}'");
+        }
+
+        // 2. Which node each named field points at (once per open).
+        var fields = name == "RecipeNote"
+            ? DescribeRecipeNoteFields((AddonRecipeNote*)unit)
+            : DescribeSynthesisFields((AddonSynthesis*)unit);
+        if (CraftProbeChanged(name + ":fields", fields))
+            _log.Info($"[CraftProbe] {name} Felder: {fields}");
+
+        // 3. State of the icon-only controls, child by child.
+        var ids = name == "RecipeNote" ? RecipeNoteProbeStateNodes : SynthesisProbeStateNodes;
+        foreach (var id in ids)
+        {
+            var state = DescribeProbeNodeState(unit, id);
+            if (CraftProbeChanged($"{name}:state{id}", state))
+                _log.Info($"[CraftProbe] {name} Zustand id={id}: {state}");
+        }
+
+        // 4. Focus inside this window, with the exact tooltip of every level.
+        var stage = AtkStage.Instance();
+        var focus = stage != null && stage->AtkInputManager != null ? stage->AtkInputManager->FocusedNode : null;
+        if (focus != null && IsNodeInAddon(focus, unit))
+        {
+            var chain = DescribeProbeChain(focus);
+            if (CraftProbeChanged(name + ":focus", chain))
+                _log.Info($"[CraftProbe] {name} Fokus {chain}");
+        }
+    }
+
+    private bool CraftProbeChanged(string key, string value)
+    {
+        if (_craftProbeLast.TryGetValue(key, out var last) && last == value) return false;
+        _craftProbeLast[key] = value;
+        return true;
+    }
+
+    /// <summary>"id(type)['tooltip'] &lt; parent ..." up to six levels.</summary>
+    private unsafe string DescribeProbeChain(AtkResNode* node)
+    {
+        var parts = new List<string>();
+        for (var up = 0; up < 6 && node != null; up++, node = node->ParentNode)
+        {
+            var tip = _tooltips.TryGetTooltip(node);
+            parts.Add($"{node->NodeId}({(int)node->Type})" + (tip != null ? $"['{tip}']" : string.Empty));
+        }
+        return string.Join(" < ", parts);
+    }
+
+    private static unsafe uint ProbeOwnerId(AtkComponentBase* comp) =>
+        comp != null && comp->OwnerNode != null ? comp->OwnerNode->AtkResNode.NodeId : 0;
+
+    private static unsafe string DescribeRecipeNoteFields(AddonRecipeNote* a) =>
+        $"Probe={ProbeOwnerId((AtkComponentBase*)a->TrialSynthesisButton)} "
+        + $"Eil={ProbeOwnerId((AtkComponentBase*)a->QuickSynthesisButton)} "
+        + $"Synthese={ProbeOwnerId((AtkComponentBase*)a->SynthesizeButton)} "
+        + $"KatZurueck={ProbeOwnerId((AtkComponentBase*)a->PreviousCategoryButton)} "
+        + $"KatVor={ProbeOwnerId((AtkComponentBase*)a->NextCategoryButton)} "
+        + $"SeiteZurueck={ProbeOwnerId((AtkComponentBase*)a->PreviousPageButton)} "
+        + $"SeiteVor={ProbeOwnerId((AtkComponentBase*)a->NextPageButton)} "
+        + $"Filter={ProbeOwnerId((AtkComponentBase*)a->RecipeFilterButton)} "
+        + $"Kategorie={ProbeOwnerId((AtkComponentBase*)a->CategoryDropDown)} "
+        + $"Rezeptliste={ProbeOwnerId((AtkComponentBase*)a->RecipeList)} "
+        + $"NQ={ProbeOwnerId((AtkComponentBase*)a->NqFillButton)} "
+        + $"HQ={ProbeOwnerId((AtkComponentBase*)a->HqFillButton)} "
+        + $"Seitentext='{AtkText.ReadClean(a->PaginationText).Trim()}' "
+        + $"Stufenwort='{AtkText.ReadClean(a->RecipeLevelLiteral).Trim()}'";
+
+    private static unsafe string DescribeSynthesisFields(AddonSynthesis* a) =>
+        $"Abbrechen={ProbeOwnerId((AtkComponentBase*)a->QuitButton)} "
+        + $"Planer={ProbeOwnerId((AtkComponentBase*)a->CalculationsButton)} "
+        + $"Icon={ProbeOwnerId((AtkComponentBase*)a->ItemIcon)} "
+        + $"Verstaerkungen={ProbeOwnerId((AtkComponentBase*)a->ToggleCraftEffectPane)} "
+        + $"Ueberlauf='{AtkText.ReadClean(a->CraftEffectOverflow).Trim()}'";
+
+    /// <summary>Visibility of the node and, for a component, checked state plus
+    /// every child's id, type, visibility and texture part.</summary>
+    private static unsafe string DescribeProbeNodeState(AtkUnitBase* unit, uint id)
+    {
+        var node = unit->GetNodeById(id);
+        if (node == null) return "fehlt";
+        var text = $"sichtbar={node->IsVisible()}";
+        if ((int)node->Type < 1000) return text;
+
+        var comp = ((AtkComponentNode*)node)->Component;
+        if (comp == null) return text + " ohne Komponente";
+        var ct = comp->GetComponentType();
+        text += $" typ={ct}";
+        if (ct is ComponentType.Button or ComponentType.RadioButton or ComponentType.CheckBox)
+            text += $" checked={((AtkComponentButton*)comp)->IsChecked}";
+
+        var kids = new List<string>();
+        for (var i = 0; i < comp->UldManager.NodeListCount; i++)
+        {
+            var k = comp->UldManager.NodeList[i];
+            if (k == null) continue;
+            var part = k->Type switch
+            {
+                NodeType.Image    => $" part={((AtkImageNode*)k)->PartId}",
+                NodeType.NineGrid => $" part={((AtkNineGridNode*)k)->PartId}",
+                _ => string.Empty,
+            };
+            kids.Add($"{k->NodeId}:{(int)k->Type}{(k->IsVisible() ? "V" : "-")}{part}");
+        }
+        return text + " [" + string.Join(" ", kids) + "]";
     }
 #endif
 
