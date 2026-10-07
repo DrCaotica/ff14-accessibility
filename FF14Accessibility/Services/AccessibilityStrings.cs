@@ -4117,6 +4117,26 @@ public static partial class AccessibilityStrings
     /// <summary>Recipe row that has been crafted at least once before.</summary>
     public static string RecipeRowCrafted =>
         IsGerman ? "schon hergestellt" : "already crafted";
+    /// <summary>How many the bag makes, the detail pane's "Herstellbar" number,
+    /// passed through as the game shows it.</summary>
+    public static string RecipeRowCraftable(string count) =>
+        IsGerman ? $"herstellbar {count}" : $"craftable {count}";
+    /// <summary>A tab of the crafting log; the name is the game's tooltip.</summary>
+    public static string CraftTab(string label) =>
+        IsGerman ? $"{label}, Registerkarte" : $"{label}, tab";
+    /// <summary>A tab whose name the game did not bind - said rather than silence.</summary>
+    public static string CraftTabUnnamed =>
+        IsGerman ? "Registerkarte ohne Namen" : "Unnamed tab";
+    /// <summary>A tab of the synthesis planner with its place in the row.</summary>
+    public static string CraftPlannerTab(string label, int index, int count) =>
+        IsGerman ? $"{label}, Registerkarte {index} von {count}" : $"{label}, tab {index} of {count}";
+    /// <summary>Tab line and the line about where the cursor landed, as one announcement.</summary>
+    public static string TabThenLine(string tab, string line) => $"{tab}. {line}";
+    /// <summary>The effect-list toggle in the synthesis window. The game gives
+    /// it neither text nor tooltip; the label is the mod's.</summary>
+    public static string SynthesisEffectsToggle(bool open) =>
+        IsGerman ? $"Liste der aktiven Verstärkungen, {(open ? "aufgeklappt" : "zugeklappt")}"
+                 : $"Active effects list, {(open ? "expanded" : "collapsed")}";
     /// <summary>Progress needed to finish the craft (client label "Fertig mit").</summary>
     public static string RecipeDifficulty(string value) =>
         IsGerman ? $"Fertig mit {value}" : $"Progress needed {value}";

@@ -43,6 +43,8 @@ public sealed class UIReaderService : IDisposable
     private readonly Configuration   _config;
     private readonly IDataManager    _data;
     private readonly TooltipService  _tooltips;
+    // Synthesis planner (CraftActionSimulator): rows named from the agent.
+    private readonly CraftPlannerHandler _craftPlanner;
     // Owns the loot roll state; asked for the row text of the NeedGreed list.
     private readonly LootRollService _lootRolls;
 
@@ -170,6 +172,10 @@ public sealed class UIReaderService : IDisposable
         "BeginnersMansionProblem", // Anfänger-Arena: eigener Handler (OnBeginnersArenaUpdate)
         "Bank",               // Gil-Depot beim Gehilfen: eigener Handler (OnBankUpdate)
         "RecipeNote",         // Handwerker-Notizbuch: eigener Handler (OnRecipeNoteUpdate)
+        // Synthese-Planer: eigener Handler (CraftPlannerHandler). Der allgemeine
+        // Weg sagte beim Oeffnen "Fortschritt +6, ..., 8 Eintraege" - die erste
+        // Zeile ohne den Namen der Aktion (Log 2026-10-07 20:10:46).
+        CraftPlannerHandler.AddonName,
         "HowTo",              // Tutorial-Text: eigener Handler (OnHowToUpdate)
         // Zauberbuch der Blaumagie: eigener Handler (OnAozNotebookUpdate). Der
         // allgemeine Weg suchte hier eine Liste, die es nicht gibt - das Fenster
@@ -278,6 +284,8 @@ public sealed class UIReaderService : IDisposable
         // Liste, "0/40" vom Suchfeld) und nie Klasse, Rezept oder Werte. Der
         // eigene Leser (OnRecipeNoteUpdate) uebernimmt beides.
         "RecipeNote",
+        // Synthese-Planer: eigener Leser (CraftPlannerHandler).
+        CraftPlannerHandler.AddonName,
         // Tutorial-Text: der generische Pfad sprach beim Oeffnen nur die
         // Fussnote (id=14, "* Tutorial-Fenster unter Charakterkonfiguration
         // ...") und beim Blaettern gar nichts, weil der Fokus auf leeren
@@ -519,6 +527,7 @@ public sealed class UIReaderService : IDisposable
         _gcRanks        = new GrandCompanyRankText(data, log);
         _dutySettings   = new ContentsFinderSettingText(log);
         _specialShops   = new SpecialShopService(data, log);
+        _craftPlanner   = new CraftPlannerHandler(data, tolk, log);
         RegisterHooks();
     }
 
@@ -667,6 +676,10 @@ public sealed class UIReaderService : IDisposable
         // SpecialSetup/UpdateAddons - that path spoke only the invisible "NEU"
         // marker, the search field's "0/40" and a row count off the wrong list.
         _addonLifecycle.RegisterListener(AddonEvent.PostUpdate, "RecipeNote", OnRecipeNoteUpdate);
+
+        // Synthesis planner: names the actions (the rows show only an icon) and
+        // the tabs. Muted in the generic paths via SpecialSetup/UpdateAddons.
+        _addonLifecycle.RegisterListener(AddonEvent.PostUpdate, CraftPlannerHandler.AddonName, OnCraftPlannerUpdate);
 
 #if DEBUG
         // Debug audit probe: pin which state follows keyboard navigation in the
@@ -940,6 +953,15 @@ public sealed class UIReaderService : IDisposable
             _log.Info($"[Accessibility] {name}: Formular-Fenster, keine Sammel-Ansage beim Oeffnen.");
             return;
         }
+        // Synthese-Fenster: die Sammel-Ansage war Wortsalat aus Beschriftungen
+        // ohne ihre Werte ("Zustand. 40. Belastbar. HQ. 80. Qualitaet. ...",
+        // Log 2026-10-07 20:10:24). Den Stand der Synthese sagt SynthesisService
+        // eine halbe Sekunde spaeter vollstaendig an.
+        if (name == "Synthesis")
+        {
+            _log.Info($"[Accessibility] {name}: keine Sammel-Ansage, SynthesisService sagt den Stand an.");
+            return;
+        }
         if (!string.IsNullOrWhiteSpace(text))
         {
             _tolk.Speak(text);
@@ -964,6 +986,10 @@ public sealed class UIReaderService : IDisposable
         _lastDialogButtonFlags.Remove(name);
         _lastDialogButtonAnnounce.Remove(name);
         _emptyListSince.Remove(name);
+
+        // The planner is torn down on close, so its reader never sees it hidden:
+        // forget it here, so the next opening speaks title, tab and row again.
+        if (name == CraftPlannerHandler.AddonName) _craftPlanner.Reset();
 
         // Reset race/gender dedup so the selection is re-announced on reopen
         if (name == "_CharaMakeRaceGender")
@@ -3448,6 +3474,19 @@ public sealed class UIReaderService : IDisposable
             return;
         }
 
+        // Synthese-Planer: die Zeilen sagt CraftPlannerHandler an, mit dem Namen
+        // der Aktion. Der generische Leser kannte nur den Text unter dem Bild
+        // ("Noch nicht erlernt.") und hat sonst dazwischengeredet.
+        var planner = _gameGui.GetAddonByName(CraftPlannerHandler.AddonName);
+        if (!planner.IsNull && _craftPlanner.IsPlannerRow(node, (AtkUnitBase*)(nint)planner))
+        {
+            _lastFocusedNodePtr  = (nint)node;
+            _lastFocusedNodeText   = string.Empty;
+            _lastFocusedNodeStable = string.Empty;
+            _lastFocusedItemName = string.Empty;
+            return;
+        }
+
         // Namenseingabe (_CharaMakeCharaName): der dedizierte Handler
         // OnCharaMakeNameUpdate sagt Feld-Label (Vorname/Nachname) + Tipp-Echo
         // an. Der generische Leser wuerde den Zeichenzaehler ("0/15") unter dem
@@ -3622,6 +3661,12 @@ public sealed class UIReaderService : IDisposable
             // that tells the user nothing about where the cursor landed. The
             // window carries its own label node for exactly this field.
             text = recipeSearch;
+        }
+        else if (TryReadSynthesisFocus(node, out var synthesisText))
+        {
+            // Synthesis window: the item icon and the effect-list toggle carry
+            // no text, the cursor stood on them in silence (log 2026-10-07).
+            text = synthesisText;
         }
         else if (TryReadGatheringFocusRow(node, out var gatherRow))
         {
@@ -3971,6 +4016,9 @@ public sealed class UIReaderService : IDisposable
             // A shop row counts as well: its name comes from the row text, not
             // from an icon slot, but it is just as much an item name.
             _itemDwellArmed = itemBranchActive || _shopRowItemActive;
+            // A tab switch that moved the cursor here: the tab name goes first
+            // in the same line, so neither cuts the other off (AnnounceTab).
+            text = TakeTabPrefix(node, text);
             // Der Knoten geht als Quelle mit: identische Doppel-Ansagen DESSELBEN
             // Knotens faengt der 0,5s-Debounce weiterhin ab, ein Schritt auf einen
             // ANDEREN Knoten mit gleichem Wort ("Einfach" -> "Einfach" in der
@@ -13478,11 +13526,198 @@ public sealed class UIReaderService : IDisposable
             _lastRecipeJob = string.Empty;
             _lastRecipeRow = string.Empty;
             _lastRecipeRendererPtr = 0;
+            _lastRecipeTabId = 0;
+            _tabPrefix = string.Empty;
+            _tabPrefixNode = 0;
             return;
         }
 
         AnnounceRecipeJobIfChanged(addon);
+        AnnounceRecipeTabIfChanged(&addon->AtkUnitBase);
         AnnounceRecipeRowIfChanged(addon);
+        FlushTabPrefixIfUnclaimed(&addon->AtkUnitBase);
+    }
+
+    // The tab row of the crafting log, dump 2026-10-07: radio buttons id=13..20
+    // for the eight crafting classes and id=21 for the recipe search. None of
+    // them carries text; the game binds each one's name as a tooltip on its
+    // collision child ("Zimmerer" ... "Gourmet", "Rezeptsuche" - probe
+    // 2026-10-07 20:08:41). Num9 opens the search tab and puts the cursor into
+    // the search field, Num7 goes back (probe 20:20:01-20:20:08).
+    private static readonly uint[] RecipeNoteTabNodeIds = [13, 14, 15, 16, 17, 18, 19, 20, 21];
+    private uint _lastRecipeTabId;
+
+    /// <summary>
+    /// Names the tab when it changes. Before, the switch back from the search
+    /// tab to the class tab was silent: the class line only speaks when the
+    /// CLASS changes, and going back to the same class changes nothing (user
+    /// 2026-10-07: "Wenn ich dann Numpad7 druecke, kommt gar nichts"). The tab
+    /// in force when the window opens is not spoken - the opening line already
+    /// names the class.
+    /// </summary>
+    private unsafe void AnnounceRecipeTabIfChanged(AtkUnitBase* unit)
+    {
+        var tabId = FindCheckedRadio(unit, RecipeNoteTabNodeIds);
+        if (tabId == 0) return; // nothing checked yet - window still building
+        if (_lastRecipeTabId == 0) { _lastRecipeTabId = tabId; return; }
+        if (tabId == _lastRecipeTabId) return;
+        _lastRecipeTabId = tabId;
+
+        var label = ReadComponentTooltip(unit->GetNodeById(tabId));
+        if (label.Length == 0)
+            _log.Warning($"[Recipe] Reiter id={tabId} ohne Tooltip - Name unbekannt.");
+        var spoken = label.Length > 0
+            ? AccessibilityStrings.CraftTab(label)
+            : AccessibilityStrings.CraftTabUnnamed;
+        _log.Info($"[Recipe] Reiter gewechselt: id={tabId} '{label}'");
+        AnnounceTab(spoken);
+    }
+
+    /// <summary>Id of the checked radio button among <paramref name="ids"/>, or 0.</summary>
+    private static unsafe uint FindCheckedRadio(AtkUnitBase* unit, uint[] ids)
+    {
+        foreach (var id in ids)
+        {
+            var node = unit->GetNodeById(id);
+            if (node == null || (int)node->Type < 1000) continue;
+            var comp = ((AtkComponentNode*)node)->Component;
+            if (comp == null || comp->GetComponentType() != ComponentType.RadioButton) continue;
+            if (((AtkComponentButton*)comp)->IsChecked) return id;
+        }
+        return 0;
+    }
+
+    /// <summary>The tooltip the game bound to a component or to one of its own
+    /// nodes (icon tabs carry it on their collision child), or empty.</summary>
+    private unsafe string ReadComponentTooltip(AtkResNode* node)
+    {
+        if (node == null) return string.Empty;
+        var own = _tooltips.TryGetTooltip(node);
+        if (own != null) return own.Trim();
+        if ((int)node->Type < 1000) return string.Empty;
+        var comp = ((AtkComponentNode*)node)->Component;
+        if (comp == null) return string.Empty;
+        for (var i = 0; i < comp->UldManager.NodeListCount; i++)
+        {
+            var tip = _tooltips.TryGetTooltip(comp->UldManager.NodeList[i]);
+            if (tip != null) return tip.Trim();
+        }
+        return string.Empty;
+    }
+
+    // A tab switch and the cursor jump it causes arrive together: the game
+    // checks the new tab and moves the focus in the same frame (probe
+    // 2026-10-07 20:20:01.076: tab id=21 checked and focus in the search field
+    // logged in one PostUpdate; the focus line followed 9 ms later). Spoken on
+    // its own, the tab name would be cut off by that focus line. So the tab name
+    // rides on the line about the node the cursor landed on - whoever speaks
+    // that node first takes it. Keyed on the node, not on time: the prefix
+    // belongs to exactly that cursor position and to no other.
+    private string _tabPrefix = string.Empty;
+    private nint   _tabPrefixNode;
+
+    /// <summary>
+    /// Speaks a tab line now, or hands it to the announcement of the node the
+    /// cursor has just moved to, when that node has not been spoken yet.
+    /// </summary>
+    private unsafe void AnnounceTab(string line)
+    {
+        var stage = AtkStage.Instance();
+        var focus = stage != null && stage->AtkInputManager != null ? stage->AtkInputManager->FocusedNode : null;
+        if (focus != null && (nint)focus != _lastFocusedNodePtr)
+        {
+            _tabPrefix = line;
+            _tabPrefixNode = (nint)focus;
+            return;
+        }
+        // The cursor stayed where it was (Num7 back from the search tab): no
+        // focus line follows, the tab line is all there is. Queued, not
+        // interrupting, so it never cuts off a line already running.
+        _tabPrefix = string.Empty;
+        _tabPrefixNode = 0;
+        _tolk.Speak(line);
+        _history.Add(MessageHistoryService.SystemKey, line);
+    }
+
+    /// <summary>
+    /// Puts a pending tab line in front of <paramref name="text"/> when the text
+    /// is about the node the tab switch moved the cursor to. A line about any
+    /// other node drops the pending prefix - it no longer describes where the
+    /// cursor is.
+    /// </summary>
+    private unsafe string TakeTabPrefix(AtkResNode* node, string text)
+    {
+        if (_tabPrefixNode == 0) return text;
+        var prefix = _tabPrefix;
+        var owner  = _tabPrefixNode;
+        _tabPrefix = string.Empty;
+        _tabPrefixNode = 0;
+        return (nint)node == owner ? AccessibilityStrings.TabThenLine(prefix, text) : text;
+    }
+
+    /// <summary>
+    /// The cursor landed on a node no reader speaks (the generic reader stays
+    /// silent on an empty text): say the tab line on its own rather than lose
+    /// it. Runs after this window's own readers had their chance in the frame.
+    /// </summary>
+    private unsafe void FlushTabPrefixIfUnclaimed(AtkUnitBase* unit)
+    {
+        if (_tabPrefixNode == 0) return;
+        // The generic focus reader already handled the node (it records every
+        // node it looked at, spoken or not) without taking the prefix.
+        if (_tabPrefixNode != _lastFocusedNodePtr) return;
+        var line = _tabPrefix;
+        _tabPrefix = string.Empty;
+        _tabPrefixNode = 0;
+        _tolk.Speak(line);
+        _history.Add(MessageHistoryService.SystemKey, line);
+    }
+
+    private unsafe void OnCraftPlannerUpdate(AddonEvent type, AddonArgs args)
+    {
+        var unit = (AtkUnitBase*)(nint)args.Addon;
+        if (unit == null) return;
+        var title = unit->IsVisible && unit->IsReady ? ReadWindowTitle(unit) : string.Empty;
+        _craftPlanner.OnUpdate(unit, title);
+    }
+
+    // Synthesis window, dump 2026-10-07 ("FFXIV_UI_Dump_Planer.txt", the
+    // Synthesis addon): the collision id=49 under Res id=46 lies over the item
+    // icon; CheckBox id=7 folds the list of active effects open (probe
+    // 2026-10-07 20:10:35: checked -> nodes 26/27 visible, unchecked -> hidden).
+    // The ClientStructs field ToggleCraftEffectPane does NOT point at id=7 in
+    // this game version (probe: it resolves to text node id=24), so the node id
+    // is used and the field is not.
+    private const uint SynthesisIconCollisionId = 49;
+    private const uint SynthesisIconContainerId = 46;
+    private const uint SynthesisEffectsToggleId = 7;
+
+    /// <summary>
+    /// Names the two text-less controls of the synthesis window: the item icon
+    /// (the item being made, from AddonSynthesis.ItemName - the field
+    /// SynthesisService already reads) and the effect-list toggle with its state.
+    /// </summary>
+    private unsafe bool TryReadSynthesisFocus(AtkResNode* focused, out string text)
+    {
+        text = string.Empty;
+        var ptr = _gameGui.GetAddonByName("Synthesis");
+        if (ptr.IsNull) return false;
+        var unit = (AtkUnitBase*)(nint)ptr;
+        if (!unit->IsVisible || !IsNodeInAddon(focused, unit)) return false;
+
+        if (focused->NodeId == SynthesisIconCollisionId
+            && focused->ParentNode != null && focused->ParentNode->NodeId == SynthesisIconContainerId)
+        {
+            text = AtkText.ReadClean(((AddonSynthesis*)unit)->ItemName).Trim();
+            return text.Length > 0;
+        }
+
+        var toggle = unit->GetNodeById(SynthesisEffectsToggleId);
+        if (toggle == null || (int)toggle->Type < 1000 || !IsNodeUnder(focused, toggle)) return false;
+        var comp = ((AtkComponentNode*)toggle)->Component;
+        if (comp == null || comp->GetComponentType() != ComponentType.CheckBox) return false;
+        text = AccessibilityStrings.SynthesisEffectsToggle(((AtkComponentButton*)comp)->IsChecked);
+        return true;
     }
 
     /// <summary>
@@ -13525,13 +13760,16 @@ public sealed class UIReaderService : IDisposable
         var renderer = ClimbToItemRenderer(focus);
         if (renderer == null) return;
 
-        var row = DescribeRecipeRow(addon, renderer);
+        var row = DescribeRecipeRow(addon, renderer, out var craftableNote);
         if ((nint)renderer == _lastRecipeRendererPtr && row == _lastRecipeRow) return;
         _lastRecipeRendererPtr = (nint)renderer;
         _lastRecipeRow = row;
         if (row.Length == 0) return;
+        // Whether the detail pane follows the cursor is not established yet -
+        // this line shows in the log when it did not (yet) for a spoken row.
+        if (craftableNote.Length > 0) _log.Info($"[Recipe] Herstellbar nicht angesagt: {craftableNote}");
 
-        _tolk.SpeakInterrupt(row);
+        _tolk.SpeakInterrupt(TakeTabPrefix(focus, row));
     }
 
     /// <summary>
@@ -13540,11 +13778,14 @@ public sealed class UIReaderService : IDisposable
     /// list beside it are read as they stand ("1-5", "Favoriten"), because their
     /// row count is not what the user is counting through.
     /// </summary>
-    private static unsafe string DescribeRecipeRow(AddonRecipeNote* addon, AtkComponentListItemRenderer* renderer)
+    private static unsafe string DescribeRecipeRow(AddonRecipeNote* addon, AtkComponentListItemRenderer* renderer,
+                                                   out string craftableNote)
     {
+        craftableNote = string.Empty;
         var text = ExpandLevelAbbreviation(ReadRendererTextsClean(renderer));
         if (text.Length == 0) return string.Empty;
 
+        var isRecipeRow = false;
         var tree = addon->RecipeList;
         if (tree != null)
         {
@@ -13555,6 +13796,7 @@ public sealed class UIReaderService : IDisposable
                 if (item != null && item->Renderer == renderer)
                 {
                     text = AccessibilityStrings.RowWithPosition(text, i + 1, total);
+                    isRecipeRow = true;
                     break;
                 }
             }
@@ -13568,7 +13810,45 @@ public sealed class UIReaderService : IDisposable
             text += ", " + (crafted.Value
                 ? AccessibilityStrings.RecipeRowCrafted
                 : AccessibilityStrings.RecipeRowNew);
+
+        // How many the bag makes: the game shows it only in the detail pane, for
+        // the recipe the pane is on ("Herstellbar", node id=78 - the field
+        // SelectedRecipeQuantityCraftableFromMaterialsInInventory, probe
+        // 2026-10-07). The rows themselves carry no such mark (dump 2026-10-07:
+        // all ten rows alike). The number is taken only when the pane names the
+        // SAME recipe as the row under the cursor - otherwise it would be the
+        // previous recipe's count, which a blind player cannot tell apart.
+        if (isRecipeRow)
+        {
+            var rowName = ReadRecipeRowName(renderer);
+            var detail  = AtkText.ReadClean(addon->SelectedRecipeName).Trim();
+            if (rowName.Length > 0 && rowName == detail)
+            {
+                var count = AtkText.ReadClean(addon->SelectedRecipeQuantityCraftableFromMaterialsInInventory).Trim();
+                if (count.Length > 0) text += ", " + AccessibilityStrings.RecipeRowCraftable(count);
+                else craftableNote = $"Detail '{detail}' ohne Herstellbar-Zahl";
+            }
+            else
+            {
+                craftableNote = $"Detail '{detail}' != Zeile '{rowName}'";
+            }
+        }
         return text; // a row of one of the other two lists carries neither position nor mark
+    }
+
+    /// <summary>The recipe name of a row: its first visible text without a digit
+    /// (the level chip "St. 1" carries one, see <see cref="ReadRendererTextsClean"/>).</summary>
+    private static unsafe string ReadRecipeRowName(AtkComponentListItemRenderer* renderer)
+    {
+        var comp = (AtkComponentBase*)renderer;
+        for (var i = 0; i < comp->UldManager.NodeListCount; i++)
+        {
+            var n = comp->UldManager.NodeList[i];
+            if (n == null || n->Type != NodeType.Text || !n->IsVisible()) continue;
+            var t = AtkText.ReadClean((AtkTextNode*)n).Trim();
+            if (t.Length > 0 && !t.Any(char.IsDigit)) return t;
+        }
+        return string.Empty;
     }
 
     // The crafting log marks a recipe that has been crafted at least once with a
@@ -15650,6 +15930,8 @@ public sealed class UIReaderService : IDisposable
         _addonLifecycle.UnregisterListener(AddonEvent.PostSetup, "LotteryDaily", OnLotteryDailyOpen);
         _addonLifecycle.UnregisterListener(AddonEvent.PostUpdate, "Character", OnCharacterUpdate);
         _addonLifecycle.UnregisterListener(AddonEvent.PostUpdate, "MountNoteBook", OnMountNoteBookUpdate);
+        _addonLifecycle.UnregisterListener(AddonEvent.PostUpdate, "RecipeNote", OnRecipeNoteUpdate);
+        _addonLifecycle.UnregisterListener(AddonEvent.PostUpdate, CraftPlannerHandler.AddonName, OnCraftPlannerUpdate);
         _addonLifecycle.UnregisterListener(AddonEvent.PostUpdate, "JournalDetail", OnQuestWindowUpdate);
         _addonLifecycle.UnregisterListener(AddonEvent.PostUpdate, "JournalAccept", OnQuestWindowUpdate);
         _addonLifecycle.UnregisterListener(AddonEvent.PostUpdate, "JournalResult", OnQuestWindowUpdate);
