@@ -14313,6 +14313,18 @@ public sealed class UIReaderService : IDisposable
                 _log.Info($"[CraftProbe] {name} Zustand id={id}: {state}");
         }
 
+        // 3b. The planner's rows carry no action name (dump 2026-10-07: icon plus
+        // effect text or "Noch nicht erlernt.", no tooltip binding). ClientStructs
+        // documents the agent's two row vectors with an ActionId per row - logged
+        // with the name from both candidate sheets, so the real source is pinned
+        // before a reader relies on it.
+        if (name == "CraftActionSimulator")
+        {
+            var rows = DescribeCraftSimulatorAgent();
+            if (CraftProbeChanged(name + ":agent", rows))
+                _log.Info($"[CraftProbe] {name} Agent: {rows}");
+        }
+
         // 4. Focus inside this window, with the exact tooltip of every level.
         var stage = AtkStage.Instance();
         var focus = stage != null && stage->AtkInputManager != null ? stage->AtkInputManager->FocusedNode : null;
@@ -14322,6 +14334,37 @@ public sealed class UIReaderService : IDisposable
             if (CraftProbeChanged(name + ":focus", chain))
                 _log.Info($"[CraftProbe] {name} Fokus {chain}");
         }
+    }
+
+    private unsafe string DescribeCraftSimulatorAgent()
+    {
+        var module = FFXIVClientStructs.FFXIV.Client.UI.Agent.AgentModule.Instance();
+        if (module == null) return "kein AgentModule";
+        var agent = (FFXIVClientStructs.FFXIV.Client.UI.Agent.AgentCraftActionSimulator*)
+            module->GetAgentByInternalId(FFXIVClientStructs.FFXIV.Client.UI.Agent.AgentId.CraftActionSimulator);
+        if (agent == null) return "kein Agent";
+
+        string Rows(FFXIVClientStructs.STD.StdVector<FFXIVClientStructs.FFXIV.Client.UI.Agent.AgentCraftActionSimulator.EfficiencyCalculation> v)
+        {
+            var parts = new List<string>();
+            var count = v.LongCount;
+            if (count < 0 || count > 64) return $"Anzahl unplausibel ({count})";
+            for (long i = 0; i < count; i++)
+            {
+                var r = v[i];
+                var craft = _data.GetExcelSheet<Lumina.Excel.Sheets.CraftAction>().TryGetRow(r.ActionId, out var c)
+                    ? c.Name.ExtractText() : "-";
+                var action = _data.GetExcelSheet<Lumina.Excel.Sheets.Action>().TryGetRow(r.ActionId, out var a)
+                    ? a.Name.ExtractText() : "-";
+                parts.Add($"[{i}] basis={r.BaseActionId} id={r.ActionId} craft='{craft}' action='{action}' "
+                          + $"fort={r.ProgressEfficiency}/{r.ProgressIncrease} qual={r.QualityEfficiency}/{r.QualityIncrease} "
+                          + $"status={r.ActionStatus}");
+            }
+            return string.Join(" ", parts);
+        }
+
+        return $"Fortschritt({agent->Progress.LongCount}): {Rows(agent->Progress)} | "
+             + $"Qualitaet({agent->Quality.LongCount}): {Rows(agent->Quality)}";
     }
 
     private bool CraftProbeChanged(string key, string value)
