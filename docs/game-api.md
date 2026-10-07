@@ -3168,8 +3168,23 @@ Quellen: Desktop-Dumps FFXIV_UI_Dump_Notizbuch.txt (RecipeNote), FFXIV_UI_Dump_P
 - Rezeptzeilen tragen kein Material-Zeichen. "Herstellbar" (id=78) gilt fuer das Rezept im
   Detailbereich; der Detailbereich FOLGT dem Cursor (Test 20:37: Name im Detail = Zeile bei
   jedem Schritt, Zahl wechselt mit: 2, 2, 0, 0).
-- Kristall-Plaetze id=82/83 (Button 1016): Text id=2 = benoetigt, id=3 = Bestand; Fokus sagt
-  nur den Bestand bzw. nichts, kein Name (offen).
+- Kristall-Plaetze id=82 (links) / id=83 (rechts) (Button 1016): Text id=2 = benoetigt, id=3 =
+  Bestand, kein Namensknoten. Links/rechts = Recipe-Sheet-Slots 6/7 (Dump Bronzespeer: Icons
+  020004/020003 = Windscherbe/Eisscherbe = Slots 6/7 von Rezept 1017, offline sqpack). Nicht
+  benutzter Platz: Text leer, Cursor erreicht ihn trotzdem. RecipeEntry.Crystals[i].Id war in
+  beiden Messungen die Item-Id (4 = Windscherbe, 3 = Eisscherbe); benutzt wird das Sheet.
+- Material-Zeilen id=89 (oben) .. id=94 (Comp 1039) = Sheet-/RecipeEntry-Slots 0..5. In der Zeile:
+  Name id=18 (Item-Link), benoetigt id=4, Symbol-Knopf id=5, NQ-Knopf id=11 (Text id=2 darin =
+  gewaehlt) ueber Text id=12 (NQ-Bestand), HQ-Knopf id=14 / Text id=15. Belegt: "1 gewaehlt,
+  2 im Beutel, 1 benoetigt" (gewaehlt kann benoetigt nicht ueberschreiten).
+- WICHTIG: Unbenutzte Material-Zeilen werden nur VERSTECKT und behalten den Text frueherer
+  Rezepte (Ahorn-Bauholz: id=90 'Wachstumsformel Alpha', id=91 'Bronzebarren', sichtbar=False).
+  Nur sichtbare Zeilen zaehlen.
+- Symbol-Knopf: AgentItemDetail antwortet dort nicht immer; der Bild-Rueckfall verwechselt
+  Gegenstaende mit gleichem Icon (Bronzebarren -> Weichsilber-Barren, Icon 20803). Gegenstand
+  daher aus RecipeList->SelectedRecipe->Ingredients[Zeile-89], gegen Name id=18 geprueft.
+- "Im Beutel" des Ergebnisses (SelectedRecipeResultQuantityInInventoryNqAndHq) steht roh als
+  "2\r1": NQ, CR, HQ-Zeichen (SeIconChar.HighQuality), HQ.
 
 **Synthesis (Synthese-Fenster)**
 - Collision id=49 (Eltern Res id=46) liegt auf dem Gegenstandsbild, Name = AddonSynthesis.ItemName.
