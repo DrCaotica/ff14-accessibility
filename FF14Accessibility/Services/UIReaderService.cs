@@ -6175,7 +6175,13 @@ public sealed class UIReaderService : IDisposable
         var comp = ((AtkComponentNode*)owner)->Component;
         if (comp == null) return false;
         var ct = comp->GetComponentType();
-        return ct is ComponentType.Slider or ComponentType.DropDownList;
+        if (ct is ComponentType.Slider or ComponentType.DropDownList) return true;
+        // Category tabs of the system configuration: AnnounceConfigGlobalFocus
+        // speaks name AND position in one line. The generic reader read the
+        // same tooltip name ~10 ms after "Reiter 3 von 8." and cut the
+        // position off (log 2026-10-10 12:52:20.432 -> .442 'Grafik').
+        return addonName == "ConfigSystem" && ct == ComponentType.DragDrop
+            && owner->NodeId is >= 7 and <= 14 && _csTabs.Count > 0;
     }
 
     /// <summary>
@@ -8005,12 +8011,17 @@ public sealed class UIReaderService : IDisposable
             }
             case ComponentType.DragDrop when top->NodeId is >= 7 and <= 14 && _csTabs.Count > 0:
             {
-                // Category tab focused (icon-only): position readout; the page
-                // heading is announced by the tab-CHANGE detector once the tab
-                // is activated.
-                var idx = _csTabs.FindIndex(t => t.NodeId == top->NodeId);
+                // Category tab focused (icon-only): its name is the tooltip the
+                // game binds to it ([ConfigProbe] tip='Sound'/'Grafik', log
+                // 2026-10-10), plus the position. The page heading is announced
+                // by the tab-CHANGE detector once the tab is activated. No
+                // tooltip known -> position only, never a guessed name.
+                var idx  = _csTabs.FindIndex(t => t.NodeId == top->NodeId);
+                var name = _tooltips.TryGetTooltipDeep(focus) ?? _tooltips.TryGetTooltip(top);
                 _csFocusValue = string.Empty;
-                desc = AccessibilityStrings.TabPositionOnly(idx + 1, _csTabs.Count);
+                desc = string.IsNullOrEmpty(name)
+                    ? AccessibilityStrings.TabPositionOnly(idx + 1, _csTabs.Count)
+                    : AccessibilityStrings.TabNamePosition(name, idx + 1, _csTabs.Count);
                 break;
             }
             default:

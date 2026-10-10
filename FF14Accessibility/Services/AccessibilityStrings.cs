@@ -4293,6 +4293,9 @@ public static partial class AccessibilityStrings
     /// <summary>Icon-only tab: position alone, no label to announce.</summary>
     public static string TabPositionOnly(int index, int count) =>
         IsGerman ? $"Reiter {index} von {count}." : $"Tab {index} of {count}.";
+    /// <summary>Focused icon tab with its game-given name: "Grafik, Reiter 3 von 8."</summary>
+    public static string TabNamePosition(string name, int index, int count) =>
+        IsGerman ? $"{name}, Reiter {index} von {count}." : $"{name}, tab {index} of {count}.";
     public static string EmptyList => IsGerman ? "Leere Liste." : "Empty list.";
     public static string DialogWord => IsGerman ? "Dialog." : "Dialog.";
 
