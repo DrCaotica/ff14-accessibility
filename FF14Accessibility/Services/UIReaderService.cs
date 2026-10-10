@@ -3705,6 +3705,13 @@ public sealed class UIReaderService : IDisposable
             // Icon-/Farbfelder, angesagt wird die Position ("12 von 52").
             text = cmfRow;
         }
+        else if (TryReadCharaSelectIconButton(node, out var charaSelectButton))
+        {
+            // Charakterauswahl: die zwei Bildknoepfe ohne Text und ohne Tooltip.
+            // Vor dem allgemeinen Zweig, weil dessen Kletterei beim Knopf in der
+            // Charakterzeile den Charakternamen fand (Log 2026-10-10 14:20:29).
+            text = charaSelectButton;
+        }
         else
         {
             // Sammel-Journal: jede Zeile der Stufenliste traegt einen "NEW"-
@@ -7073,6 +7080,45 @@ public sealed class UIReaderService : IDisposable
         place = ReadAddonComponentText(addon, 7, 5);
         return jobLevel.Length > 0 || place.Length > 0;
     }
+
+    /// <summary>
+    /// Label for the two icon buttons in <c>_CharaSelectListMenu</c>, or false when
+    /// the focus is elsewhere. Both are Comp(1007) buttons holding only Collision,
+    /// Res and Image (ConfigBackUp_hr1.tex) - no text node, and the game binds no
+    /// tooltip to them or any parent (probe 2026-10-10 14:25, five levels checked).
+    /// The generic reader therefore climbed to the list row and spoke the
+    /// character name on the row button, and nothing at all on the top one.
+    ///
+    /// Structure and function from dump and log 2026-10-10:
+    /// - button id=2 inside the row's ListItemRenderer (Comp 1011) opens
+    ///   CharaSelectCharaConfigMain ("Speichert die Einstellungen für Maus und Gamepad.")
+    /// - button id=6 directly under the root opens CharaSelectSystemConfigMain
+    ///   ("Speichert UI-Größe, Bildfrequenz und andere Anzeigeeinstellungen.")
+    /// </summary>
+    private unsafe bool TryReadCharaSelectIconButton(AtkResNode* node, out string label)
+    {
+        label = string.Empty;
+        if (node == null || FindAddonNameForNode(node) != "_CharaSelectListMenu") return false;
+
+        // Focus sits on the button's Collision child.
+        var button = (int)node->Type == CharaSelectIconButtonType ? node : node->ParentNode;
+        if (button == null || (int)button->Type != CharaSelectIconButtonType) return false;
+        var parent = button->ParentNode;
+        if (parent == null) return false;
+
+        if (button->NodeId == 2 && (int)parent->Type == CharaSelectRowRendererType)
+            label = AccessibilityStrings.CharaSelectCharaConfigButton;
+        else if (button->NodeId == 6 && parent->ParentNode == null)
+            label = AccessibilityStrings.CharaSelectSystemConfigButton;
+
+        return label.Length > 0;
+    }
+
+    /// <summary>ULD component type of the icon buttons in <c>_CharaSelectListMenu</c> (dump 2026-10-10: Comp(1007)).</summary>
+    private const int CharaSelectIconButtonType = 1007;
+
+    /// <summary>ULD component type of a character row in <c>_CharaSelectListMenu</c> (dump 2026-10-10: Comp(1011), ListItemRenderer).</summary>
+    private const int CharaSelectRowRendererType = 1011;
 
     /// <summary>Name on <c>_CharaSelectInfo</c> text node id=3 (Log 2026-09-14).</summary>
     private unsafe string ReadCharaSelectInfoName()

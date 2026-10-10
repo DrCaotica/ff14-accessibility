@@ -17,6 +17,13 @@ public static partial class AccessibilityStrings
 
     public static string TitleScreen => IsGerman ? "Titelbildschirm" : "Title screen";
     public static string MainMenu => IsGerman ? "Hauptmenü" : "Main menu";
+
+    /// <summary>Icon button in a character select row; opens CharaSelectCharaConfigMain (backup of that character's settings).</summary>
+    public static string CharaSelectCharaConfigButton =>
+        IsGerman ? "Charakterkonfiguration sichern, Knopf" : "Back up character configuration, button";
+    /// <summary>Icon button next to "New Character"; opens CharaSelectSystemConfigMain (backup of the system settings).</summary>
+    public static string CharaSelectSystemConfigButton =>
+        IsGerman ? "Systemkonfiguration sichern, Knopf" : "Back up system configuration, button";
     public static string Back => IsGerman ? "Zurück" : "Back";
     public static string NoHelpAvailable => IsGerman ? "Keine Hilfe verfügbar" : "No help available";
     public static string HelpForTitle => IsGerman
