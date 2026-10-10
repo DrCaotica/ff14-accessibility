@@ -7901,6 +7901,7 @@ public sealed class UIReaderService : IDisposable
         // Top-Level-Text DIREKT VOR dem Control in der Node-Liste
         // (Dump: "Transparenz" vor Slider id=570, "Größe" vor id=566).
         AnnounceConfigGlobalFocus(addon);
+        HandleConfigHelpDwell(addon);
 
         // 2. Fokus auf Optionen (CheckBox, Slider, etc.) prüfen
         var (focused, nodeId) = FindFocusedText(addon);
@@ -8012,8 +8013,20 @@ public sealed class UIReaderService : IDisposable
             }
             case ComponentType.DropDownList:
             {
-                var ddLabel  = ConfigControlLabel(addon, top, _csFocusTopIdx, forwardFirst: false, allowRight: true);
+                var isUiSkin = top->NodeId == UiSkinDropDownId;
+                var ddLabel  = isUiSkin
+                    ? ReadConfigTextById(addon, UiSkinHeadingId)
+                    : ConfigControlLabel(addon, top, _csFocusTopIdx, forwardFirst: false, allowRight: true);
                 var dropdown = DescribeDropDown((AtkComponentDropDownList*)comp, focus, ddLabel);
+                // Farbschema: the scheme's own one-line description sits on the
+                // preview picture; it belongs to the closed list, not to every
+                // option (it does not follow the browsed row - log 2026-10-10
+                // 21:50:25-34, the text scanner reported no change).
+                if (isUiSkin && dropdown.Text.Length > 0 && FindDropDownFocusRow((AtkComponentDropDownList*)comp, focus) < 0)
+                {
+                    var scheme = ReadConfigTextById(addon, UiSkinSchemeTextId);
+                    if (scheme.Length > 0) dropdown = ($"{dropdown.Text} {scheme}", dropdown.Value);
+                }
                 if (dropdown.Text.Length == 0)
                 {
                     // Seit der Doppelansage-Fix greift, ist dieser Zweig die
@@ -8078,6 +8091,80 @@ public sealed class UIReaderService : IDisposable
         if (top == null || (int)top->Type < 1000 || top->NodeId is < 7 or > 14) return false;
         var comp = ((AtkComponentNode*)top)->Component;
         return comp != null && comp->GetComponentType() == ComponentType.DragDrop;
+    }
+
+    // Tab Farbschema (dump 2026-10-10 21:35): heading "Farbschema wählen"
+    // (Text 497 @697,330), preview picture (Image 501) carrying the caption
+    // "Vorschau" (Text 500) and the scheme description "Kühl und klassisch."
+    // (Text 499), the drop-down (502 @717,544) and under it the explanation
+    // "Diese Funktion ändert das Farbschema der UI-Fenster ..." (Text 505
+    // @717,576 512x120). The geometric label search took the picture caption
+    // "Vorschau" as the list's name (log 2026-10-10 21:45:29), and both texts
+    // were never read. ULD node ids are fixed per window layout, the same way
+    // the category tabs 7-14 are addressed.
+    private const uint UiSkinHeadingId    = 497;
+    private const uint UiSkinSchemeTextId = 499;
+    private const uint UiSkinDropDownId   = 502;
+    private const uint UiSkinHelpTextId   = 505;
+
+    // Dwell for the Farbschema explanation: which control the clock is timing,
+    // since when, and whether the text was already queued for this dwell.
+    private nint _csHelpDwellTop;
+    private long _csHelpTick;
+    private bool _csHelpSpoken;
+
+    /// <summary>Visible text of a top-level ConfigSystem text node, cleaned and
+    /// trimmed; "" when the node is missing, hidden or not a text.</summary>
+    private static unsafe string ReadConfigTextById(AtkUnitBase* addon, uint nodeId)
+    {
+        var n = addon->GetNodeById(nodeId);
+        if (n == null || n->Type != NodeType.Text || !IsEffectivelyVisible(n)) return string.Empty;
+        return AtkText.ReadClean((AtkTextNode*)n).Trim();
+    }
+
+    /// <summary>
+    /// Speaks the Farbschema explanation (Text 505) once the focus has stayed on
+    /// the CLOSED colour-scheme list for <see cref="ActionDescDwellSeconds"/> -
+    /// the same dwell as attribute and duty-finder help, so stepping past stays
+    /// quick. Runs every ConfigSystem frame; any other focus resets the clock.
+    /// </summary>
+    private unsafe void HandleConfigHelpDwell(AtkUnitBase* addon)
+    {
+        var stage = AtkStage.Instance();
+        var focus = stage != null && stage->AtkInputManager != null ? stage->AtkInputManager->FocusedNode : null;
+        var top   = (AtkResNode*)_csFocusTop;
+        var onList = focus != null && (nint)focus == _csFocusPtr && top != null
+                     && top->NodeId == UiSkinDropDownId && (int)top->Type >= 1000
+                     && ((AtkComponentNode*)top)->Component != null
+                     && FindDropDownFocusRow((AtkComponentDropDownList*)((AtkComponentNode*)top)->Component, focus) < 0;
+        if (!onList)
+        {
+            _csHelpDwellTop = 0;
+            return;
+        }
+
+        if (_csHelpDwellTop != _csFocusTop)
+        {
+            _csHelpDwellTop = _csFocusTop;
+            _csHelpTick     = System.Diagnostics.Stopwatch.GetTimestamp();
+            _csHelpSpoken   = false;
+            return;
+        }
+
+        if (_csHelpSpoken) return;
+        var elapsed = (double)(System.Diagnostics.Stopwatch.GetTimestamp() - _csHelpTick)
+                      / System.Diagnostics.Stopwatch.Frequency;
+        if (elapsed < ActionDescDwellSeconds) return;
+
+        _csHelpSpoken = true; // one-shot per dwell, even when there is no text
+        var help = FlattenDescription(ReadConfigTextById(addon, UiSkinHelpTextId));
+        if (help.Length == 0)
+        {
+            _log.Info($"[CS] Farbschema: Erklaerungstext id={UiSkinHelpTextId} leer oder unsichtbar.");
+            return;
+        }
+        _log.Info($"[CS] Farbschema-Erklaerung: '{help}'");
+        _tolk.Speak(AccessibilityStrings.SettingHelp(help));
     }
 
     /// <summary>Speech form of a config control value: percentage sliders (0..100)
