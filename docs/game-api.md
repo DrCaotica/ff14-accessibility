@@ -1583,6 +1583,12 @@ dalamud.log 2026-10-06 06:28–07:02, `NodeFlags` per ilspycmd aus FFXIVClientSt
 - `CharacterProfile`: per Cursor erreichbar sind nur zwei Knöpfe (Titel
   „Andere Titel“, Comp id=7; Gesellschaft, Comp id=11). Namenstag,
   Schutzgottheit usw. sind reine Textknoten.
+- Attribut-Erklaerungen: das Spiel bindet beim Aufbau von `CharacterStatus` an
+  jeden Eintrag einen Text-Tooltip „<Name>: <Erklaerung>“ (z. B. „Intelligenz:
+  Beeinflusst die Stärke der Offensivmagie von Angreifern.“). `TooltipService.
+  TryGetTooltipDeep` vom Fokusknoten (Collision id=4) aus findet ihn, Log
+  2026-10-10 15:13–15:14: 15 von 15 Verweilen richtig zugeordnet, nie „kein Tooltip“.
+  Plugin: `HandleAttributeHelpDwell` sagt ihn nach 0,4 s als „Beschreibung: …“.
 - Plugin: alle drei in `CharacterTabAddons` → `SpecialUpdateAddons` (kein
   FindFocusedText) und keine Sammel-Ansage in `OnAnyAddonOpen`;
   `TryReadCharacterTabFocusRow` liest Name + Wert per Id.
