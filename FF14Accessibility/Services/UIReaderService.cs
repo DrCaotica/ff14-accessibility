@@ -1606,6 +1606,24 @@ public sealed class UIReaderService : IDisposable
             return false;
         }
 
+        // Arrow-key navigation makes the game send MouseOver to the newly
+        // focused button too. That button belongs to UpdateGlobalFocus, which
+        // already said the whole line; this reader only knows the first text and
+        // cut it off 1 ms later with a bare number (ArmouryBoard: "Kategorie
+        // Rumpf, 11." then "11", log 2026-10-10 12:36:57.321/.322). A real mouse
+        // hover on any other component is still announced below.
+        if (interrupt)
+        {
+            var stage = AtkStage.Instance();
+            var focused = stage != null && stage->AtkInputManager != null
+                ? stage->AtkInputManager->FocusedNode : null;
+            if (IsFocusInside(focused, (AtkResNode*)match))
+            {
+                _log.Info($"[Accessibility] {addonName}: MouseOver auf dem Tastatur-Fokus (node id={((AtkResNode*)match)->NodeId}), Fokus-Leser zustaendig.");
+                return true;
+            }
+        }
+
         var text = ReadFirstTextInComponent((AtkResNode*)match);
         var key  = ((AtkResNode*)match)->NodeId;
         if (string.IsNullOrWhiteSpace(text))
