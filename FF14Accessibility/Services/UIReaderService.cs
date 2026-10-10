@@ -529,6 +529,7 @@ public sealed class UIReaderService : IDisposable
         _addonLifecycle.RegisterListener(AddonEvent.PostUpdate,       OnAnyAddonUpdate);
         _addonLifecycle.RegisterListener(AddonEvent.PostReceiveEvent, OnAnyAddonReceive);
         _addonLifecycle.RegisterListener(AddonEvent.PreFinalize,      OnAnyAddonClose);
+        _addonLifecycle.RegisterListener(AddonEvent.PreSetup,   "Hud", OnHudPreSetup);
 
         // -- Talk / TalkSubtitle (NPC-Dialoge, Untertitel) ---------
         _addonLifecycle.RegisterListener(AddonEvent.PostUpdate, "Talk", OnTalkUpdate);
@@ -797,6 +798,24 @@ public sealed class UIReaderService : IDisposable
 
     /// <summary>True while the post-login quiet period is running.</summary>
     private bool InLoginQuiet => DateTime.UtcNow < _quietUntil;
+
+    // Dalamud's ClientState.Login fires too late to cover the HUD build: it
+    // waits for a set Condition flag AND a LocalPlayer (Dalamud
+    // ClientState.OnFrameworkUpdate), which arrive 2-3 s after the windows.
+    // Log 2026-10-10: HUD built 12:57:06.558-.626 (SEITE AN SEITE, INVENTAR,
+    // Ziel, Alte Herausforderungen neu erleben, ...), Login 12:57:08.934.
+    // The game's "Hud" addon is set up exactly once per login, at the very
+    // start of that build: eight logins 2026-10-05..10 in dalamud(.old).log,
+    // never on zone change, plugin reload or logout to the title screen
+    // (FadeBack/NowLoading do appear there, so they are no login marker).
+    // PreSetup so the quiet is already running for Hud's own PostSetup.
+    // The later Login call still restarts the timer, so the quiet ENDS as
+    // before; only its start moves forward.
+    private void OnHudPreSetup(AddonEvent type, AddonArgs args)
+    {
+        _log.Info("[Accessibility] Hud wird aufgebaut (Anmeldung).");
+        BeginLoginQuiet(_config.LoginQuietSeconds);
+    }
 
     private unsafe void OnAnyAddonOpen(AddonEvent type, AddonArgs args)
     {
@@ -15408,6 +15427,7 @@ public sealed class UIReaderService : IDisposable
         _addonLifecycle.UnregisterListener(AddonEvent.PostUpdate,       OnAnyAddonUpdate);
         _addonLifecycle.UnregisterListener(AddonEvent.PostReceiveEvent, OnAnyAddonReceive);
         _addonLifecycle.UnregisterListener(AddonEvent.PreFinalize,      OnAnyAddonClose);
+        _addonLifecycle.UnregisterListener(AddonEvent.PreSetup,   "Hud", OnHudPreSetup);
         _addonLifecycle.UnregisterListener(AddonEvent.PostUpdate, "Talk",         OnTalkUpdate);
         _addonLifecycle.UnregisterListener(AddonEvent.PostUpdate, "TalkSubtitle", OnTalkUpdate);
         _addonLifecycle.UnregisterListener(AddonEvent.PostUpdate, "_BattleTalk",  OnTalkUpdate);
