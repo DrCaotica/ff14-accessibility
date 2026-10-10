@@ -357,6 +357,15 @@ public sealed class UIReaderService : IDisposable
         // ohnehin unhoerbar, und den Inhalt sagt ItemCompareService gesammelt auf
         // Strg+Umschalt+F12 an - genau die Loesung, die V5.14 fuer ItemDetail fand.
         "ItemDetailCompare",
+        // LoadingTips: one text node only, and it held the same
+        // "Nach Mindeststufe sortieren" at every login 2026-10-05..10 (11 of 11,
+        // dalamud(.old).log; dump 2026-10-10 13:24: Vis=False, Nodes=3). The game
+        // never changed that text and never showed the window afterwards. It is
+        // reported visible for a moment at PostSetup, like the rest of the HUD,
+        // but is set up 3-4 ms BEFORE "Hud" starts the login quiet (OnHudPreSetup),
+        // so it was spoken at every login. Earlier markers (FadeBack/NowLoading)
+        // also fire on logout to the title screen and would mute the title menu.
+        "LoadingTips",
         // ActionDetail — DASSELBE MUSTER (Log 2026-09-14 09:05–09:06, Kommandoliste
         // Eigenschaften): bei jedem Skill-/Trait-Fokus sprach der Scanner
         // Job-Kuerzel, "St. N", Beschreibung und Name EINZELN mit SpeakInterrupt;
