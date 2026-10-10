@@ -8003,6 +8003,11 @@ public sealed class UIReaderService : IDisposable
                     ? AccessibilityStrings.SliderPercent(sliderLabel, _csFocusValue)
                     : AccessibilityStrings.SliderDesc(sliderLabel, _csFocusValue,
                         slider->MinValue, slider->MaxValue);
+                // Ends named under the slider ("Bei Kamera" / "Bei Charakter")
+                // are the only explanation the game shows for such a setting.
+                var (minEnd, maxEnd) = SliderEndLabels(addon, top);
+                if (minEnd.Length > 0)
+                    desc = AccessibilityStrings.SliderWithEnds(desc.TrimEnd('.'), minEnd, maxEnd);
                 break;
             }
             case ComponentType.DropDownList:
@@ -8366,6 +8371,48 @@ public sealed class UIReaderService : IDisposable
         _log.Info($"[CS-Label] Geometrie ohne Treffer fuer id={control->NodeId} "
                   + $"@{control->ScreenX:0},{control->ScreenY:0} - Listenreihenfolge als Rueckfall.");
         return forwardFirst ? NearestPanelLabel(addon, topIdx) : NearestPrecedingLabel(addon, topIdx);
+    }
+
+    /// <summary>
+    /// Names of a slider's two ends when the window prints them directly under
+    /// it, left end first; both "" otherwise. Measured in ConfigSystem, tab
+    /// Sound (dump 2026-10-10 21:35): slider "Simulierung der Geräuschquelle"
+    /// id 107 @715,526 220x16, below it "Bei Kamera" id 108 @715,542 and
+    /// "Bei Charakter" id 109 @843,542. A sighted player reads the setting's
+    /// meaning from exactly these two words.
+    ///
+    /// Taken only when EXACTLY two visible texts start in the band of one slider
+    /// height below the slider and inside its horizontal span - the names of
+    /// the neighbouring rows sit behind the slider (@961, see
+    /// <see cref="ConfigLabelByGeometry"/>) and never qualify, and anything
+    /// else than a pair is not a pair of ends.
+    /// </summary>
+    private unsafe (string Min, string Max) SliderEndLabels(AtkUnitBase* addon, AtkResNode* slider)
+    {
+        var scale   = addon->Scale > 0f ? addon->Scale : 1f;
+        var cLeft   = slider->ScreenX;
+        var cRight  = cLeft + slider->Width * scale;
+        var cHeight = slider->Height * scale;
+        var cBottom = slider->ScreenY + cHeight;
+        var cMidY   = slider->ScreenY + cHeight / 2f;
+
+        var found = new List<(float X, string Text)>();
+        for (var i = 0; i < addon->UldManager.NodeListCount; i++)
+        {
+            var n = addon->UldManager.NodeList[i];
+            if (n == null || !IsEffectivelyVisible(n)) continue;
+            var t = ReadPanelLabelText(n);
+            if (t.Length == 0) continue;
+            if (n->ScreenY < cMidY || n->ScreenY > cBottom + cHeight) continue;
+            if (n->ScreenX < cLeft || n->ScreenX >= cRight) continue;
+            found.Add((n->ScreenX, t));
+        }
+        if (found.Count != 2) return (string.Empty, string.Empty);
+        found.Sort((a, b) => a.X.CompareTo(b.X));
+#if DEBUG
+        _log.Info($"[CS-Label] Endpunkte fuer id={slider->NodeId}: '{found[0].Text}' / '{found[1].Text}'");
+#endif
+        return (found[0].Text, found[1].Text);
     }
 
     /// <summary>

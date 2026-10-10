@@ -1787,6 +1787,12 @@ public static partial class AccessibilityStrings
     // by the next control while navigating quickly (user report 2026-07-27).
     public static string SliderPercent(string label, string value) =>
         IsGerman ? $"{label}, {value} %" : $"{label}, {value}%";
+    /// <summary>Slider whose two ends are named on screen ("Bei Kamera" /
+    /// "Bei Charakter"): the value plus what its ends mean.</summary>
+    public static string SliderWithEnds(string valueSpeech, string minEnd, string maxEnd) =>
+        IsGerman
+            ? $"{valueSpeech}, von {minEnd} bis {maxEnd}"
+            : $"{valueSpeech}, from {minEnd} to {maxEnd}";
     public static string DropdownDesc(string label, string value) =>
         IsGerman ? $"{label}, Auswahlliste, {value}." : $"{label}, dropdown, {value}.";
     /// <summary>One option while stepping through an OPENED drop-down. Names the
