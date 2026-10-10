@@ -18,9 +18,11 @@ public static partial class AccessibilityStrings
     public static string TitleScreen => IsGerman ? "Titelbildschirm" : "Title screen";
     public static string MainMenu => IsGerman ? "Hauptmenü" : "Main menu";
 
-    /// <summary>Icon button in a character select row; opens CharaSelectCharaConfigMain (backup of that character's settings).</summary>
+    /// <summary>Icon button in a character select row; opens CharaSelectCharaConfigMain (backup of that character's settings).
+    /// Wording follows the game's own entry for the same function in the row's context menu
+    /// ("Charaktereinstellungen sichern", log 2026-10-10 14:35:57).</summary>
     public static string CharaSelectCharaConfigButton =>
-        IsGerman ? "Charakterkonfiguration sichern, Knopf" : "Back up character configuration, button";
+        IsGerman ? "Charaktereinstellungen sichern, Knopf" : "Back up character settings, button";
     /// <summary>Icon button next to "New Character"; opens CharaSelectSystemConfigMain (backup of the system settings).</summary>
     public static string CharaSelectSystemConfigButton =>
         IsGerman ? "Systemkonfiguration sichern, Knopf" : "Back up system configuration, button";
