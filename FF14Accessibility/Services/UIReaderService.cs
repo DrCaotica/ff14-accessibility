@@ -7995,7 +7995,7 @@ public sealed class UIReaderService : IDisposable
                 // value-change branch above still detects changes reliably.
                 _csFocusPercent = slider->MinValue == 0 && slider->MaxValue == 100;
                 _csFocusValue = slider->Value.ToString();
-                var sliderLabel = ConfigControlLabel(addon, top, _csFocusTopIdx, forwardFirst: false);
+                var sliderLabel = ConfigControlLabel(addon, top, _csFocusTopIdx, forwardFirst: false, allowRight: true);
                 // Percentage sliders (volumes) get the SHORT form "label, value %"
                 // so it finishes speaking before the user moves on; other sliders
                 // keep the full form with their real min/max range.
@@ -8007,7 +8007,7 @@ public sealed class UIReaderService : IDisposable
             }
             case ComponentType.DropDownList:
             {
-                var ddLabel  = ConfigControlLabel(addon, top, _csFocusTopIdx, forwardFirst: false);
+                var ddLabel  = ConfigControlLabel(addon, top, _csFocusTopIdx, forwardFirst: false, allowRight: true);
                 var dropdown = DescribeDropDown((AtkComponentDropDownList*)comp, focus, ddLabel);
                 if (dropdown.Text.Length == 0)
                 {
@@ -8228,9 +8228,23 @@ public sealed class UIReaderService : IDisposable
     /// <summary>
     /// Label of a text-less configuration control (slider, drop-down, option
     /// row), chosen by SCREEN GEOMETRY: the nearest visible text that shares the
-    /// control's row and starts to its LEFT, otherwise the nearest text directly
+    /// control's row and starts to its LEFT, otherwise the nearest one in the row
+    /// that starts behind its RIGHT edge, otherwise the nearest text directly
     /// ABOVE it. That is the same thing a sighted player reads, and it does not
     /// depend on the order the window happens to be authored in.
+    ///
+    /// WHY the right side: ConfigSystem places slider names BEHIND the slider.
+    /// Dump 2026-10-10 21:35, tab Sound: slider id 113 @715 (220 wide), mute
+    /// checkbox id 114 @933, name "Hauptlautstärke" id 115 @961 - the same for
+    /// all seven volume rows, "Eigene"/"Gruppenmitglieder"/"Andere" and
+    /// "Systemtöne über Lautsprecher"; tab Barrierefreiheit the same for
+    /// "Größe", "Transparenz" and "Stärke" (sliders @735, names @961). With only
+    /// left and above, every volume slider was called by its block heading
+    /// "Lautstärkeeinstellungen" (log 2026-10-10 21:30:32-21:30:39). Left still
+    /// wins, so rows with a name in front keep it. The right side is opt-in
+    /// (<paramref name="allowRight"/>, set by <see cref="ConfigControlLabel"/>):
+    /// for the duty-finder and search windows no dump shows where their names
+    /// sit, so they keep left/above.
     ///
     /// WHY the node-list rules had to go: the list is ordered by descending node
     /// id, not by layout, and the direction therefore differs per panel. Log
@@ -8251,7 +8265,8 @@ public sealed class UIReaderService : IDisposable
     /// window's Scale applied before they are compared to screen distances.
     /// Returns "" when neither pass finds anything, so the caller can fall back.
     /// </summary>
-    private unsafe string ConfigLabelByGeometry(AtkUnitBase* addon, AtkResNode* control, out ConfigLabelSource how)
+    private unsafe string ConfigLabelByGeometry(AtkUnitBase* addon, AtkResNode* control, out ConfigLabelSource how,
+                                                bool allowRight = false)
     {
         how = ConfigLabelSource.None;
         if (addon == null || control == null) return string.Empty;
@@ -8266,6 +8281,8 @@ public sealed class UIReaderService : IDisposable
         var bestRowX   = float.MinValue;
         var bestAbove  = string.Empty;
         var bestAboveY = float.MinValue;
+        var bestRight  = string.Empty;
+        var bestRightX = float.MaxValue;
 
         for (var i = 0; i < addon->UldManager.NodeListCount; i++)
         {
@@ -8291,6 +8308,7 @@ public sealed class UIReaderService : IDisposable
             if (Math.Abs(nMidY - cMidY) <= Math.Max(cHeight, nHeight) / 2f)
             {
                 if (nLeft < cLeft && nLeft > bestRowX) { bestRowX = nLeft; bestRow = t; }
+                else if (nLeft >= cLeft + cWidth && nLeft < bestRightX) { bestRightX = nLeft; bestRight = t; }
                 continue;
             }
 
@@ -8303,6 +8321,7 @@ public sealed class UIReaderService : IDisposable
         }
 
         if (bestRow.Length > 0)   { how = ConfigLabelSource.RowLeft;      return bestRow; }
+        if (allowRight && bestRight.Length > 0) { how = ConfigLabelSource.RowRight;     return bestRight; }
         if (bestAbove.Length > 0) { how = ConfigLabelSource.HeadingAbove; return bestAbove; }
         return string.Empty;
     }
@@ -8315,6 +8334,7 @@ public sealed class UIReaderService : IDisposable
     {
         None,
         RowLeft,
+        RowRight,
         HeadingAbove,
     }
 
@@ -8323,11 +8343,14 @@ public sealed class UIReaderService : IDisposable
     /// <see cref="ConfigLabelByGeometry"/>), node-list order only as a fallback
     /// for windows where no text sits left of or above the control.
     /// <paramref name="forwardFirst"/> picks the fallback direction that window
-    /// family was measured with.
+    /// family was measured with. <paramref name="allowRight"/> also accepts a
+    /// name behind the control - measured for ConfigSystem only (dump 2026-10-10),
+    /// the character-configuration panels are not measured and keep left/above.
     /// </summary>
-    private unsafe string ConfigControlLabel(AtkUnitBase* addon, AtkResNode* control, int topIdx, bool forwardFirst)
+    private unsafe string ConfigControlLabel(AtkUnitBase* addon, AtkResNode* control, int topIdx, bool forwardFirst,
+                                             bool allowRight = false)
     {
-        var geo = ConfigLabelByGeometry(addon, control, out var how);
+        var geo = ConfigLabelByGeometry(addon, control, out var how, allowRight);
         if (geo.Length > 0)
         {
 #if DEBUG
