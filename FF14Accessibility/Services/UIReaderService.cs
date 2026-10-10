@@ -7597,10 +7597,20 @@ public sealed class UIReaderService : IDisposable
         _csLastTabIndex = tabIdx;
         _csLastTabText  = tabLabel;
 
-        // Ansage: "Systemeinstellungen. [Tab X von N.]"
+        // Ansage: "Systemeinstellungen. [Seitenueberschrift.]" - OHNE Position.
+        // tabIdx ist hier nicht belegt: alle acht Reiter tragen denselben
+        // Child-4-Zustand ([CS-TAB] T7..T14 alle F=0x2FB3, eff=True), also
+        // gewinnt immer der erste in der Knotenliste (id=14) und es hiess
+        // "Anzeigeeinstellungen, Tab 8 von 8" auf Reiter 1 (Log 2026-10-05
+        // 05:54:33 und 2026-10-10 12:37:32). ClientStructs hat weder Addon-
+        // noch Agent-Struktur fuer ConfigSystem, und ConfigSystemNumberArray
+        // aendert sich beim Reiterwechsel nicht ([CS-NUM] ohne Change-Zeile).
+        // Wie beim Reiterwechsel gilt: unbestaetigt nicht sprechen. Die
+        // Position sagt der Fokus-Leser, sobald man auf den Reitern steht.
+        _log.Info($"[CS] Oeffnen: Seite '{tabLabel}', Reiter-Index unbestaetigt (Erkennung lieferte {tabIdx + 1}).");
         var sb = new StringBuilder(AccessibilityStrings.ConfigSystem);
-        if (!string.IsNullOrEmpty(tabLabel) && _csTabs.Count > 0)
-            sb.Append($". {AccessibilityStrings.TabPosition(tabLabel, tabIdx + 1, _csTabs.Count)}");
+        if (!string.IsNullOrEmpty(tabLabel))
+            sb.Append($". {tabLabel}");
         sb.Append(".");
         _tolk.SpeakInterrupt(sb.ToString());
     }
