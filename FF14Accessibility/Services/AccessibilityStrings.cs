@@ -1925,7 +1925,7 @@ public static partial class AccessibilityStrings
         $"{label}. {description}";
 
     /// <summary>The tooltip description spoken on its own after the focus has
-    /// dwelled on an inventory item (the name was already announced when the
+    /// dwelled on an inventory item or a character attribute (the name was already announced when the
     /// focus landed) - prefixed so the user knows what is being read.</summary>
     public static string ItemDescription(string description) =>
         IsGerman ? $"Beschreibung: {description}" : $"Description: {description}";
