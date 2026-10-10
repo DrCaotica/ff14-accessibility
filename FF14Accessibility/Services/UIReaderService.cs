@@ -8007,8 +8007,8 @@ public sealed class UIReaderService : IDisposable
             }
             case ComponentType.DropDownList:
             {
-                var dropdown = DescribeDropDown((AtkComponentDropDownList*)comp, focus,
-                                                ConfigControlLabel(addon, top, _csFocusTopIdx, forwardFirst: false));
+                var ddLabel  = ConfigControlLabel(addon, top, _csFocusTopIdx, forwardFirst: false);
+                var dropdown = DescribeDropDown((AtkComponentDropDownList*)comp, focus, ddLabel);
                 if (dropdown.Text.Length == 0)
                 {
                     // Seit der Doppelansage-Fix greift, ist dieser Zweig die
@@ -8018,10 +8018,18 @@ public sealed class UIReaderService : IDisposable
                     _log.Info($"[CS] Aufklappfeld id={top->NodeId} ohne lesbaren Wert - stumm.");
                     return;
                 }
-                if (dropdown.Value.Length == 0)
-                    LogEmptyDropDownProbe((AtkComponentDropDownList*)comp, top);
                 _csFocusValue = dropdown.Value;
                 desc = dropdown.Text;
+                // A closed drop-down can show an EMPTY field: "Voreinstellungen"
+                // in the display tab holds one row with no text, and its own
+                // display text is empty too ([DD-PROBE] 2026-10-10 13:47:54:
+                // Sel=0 Len=1, every text node ''). Say "leer" instead of a
+                // bare period. It was also greyed out (F=0x2113, Enabled 0x20
+                // cleared) - the same cue the switches already give.
+                if (dropdown.Value.Length == 0)
+                    desc = AccessibilityStrings.DropdownDesc(ddLabel, AccessibilityStrings.InputEmpty);
+                if (((ushort)top->NodeFlags & (ushort)NodeFlags.Enabled) == 0)
+                    desc = $"{desc.TrimEnd('.')}, {AccessibilityStrings.StateDisabled}.";
                 break;
             }
             case ComponentType.DragDrop when top->NodeId is >= 7 and <= 14 && _csTabs.Count > 0:
@@ -8051,54 +8059,6 @@ public sealed class UIReaderService : IDisposable
         _log.Info($"[CS] Fokus (global): {desc}{(queue ? " (angehaengt an Oeffnen)" : string.Empty)}");
         if (queue) _tolk.Speak(desc);
         else       _tolk.SpeakInterrupt(desc);
-    }
-
-    /// <summary>
-    /// [DD-PROBE] Diagnostic for a closed drop-down whose stored value reads
-    /// empty ("Voreinstellungen, Auswahlliste, ." in the display tab, log
-    /// 2026-10-10 13:40:14): logs the list's index/length fields, every
-    /// renderer row's text and every text node inside the drop-down, so the
-    /// real source of the shown value can be chosen from data, not guessed.
-    /// </summary>
-    private unsafe void LogEmptyDropDownProbe(AtkComponentDropDownList* dd, AtkResNode* top)
-    {
-        var list = dd->List;
-        if (list == null)
-        {
-            _log.Info($"[DD-PROBE] id={top->NodeId}: List=null");
-            return;
-        }
-        var rows = new List<string>();
-        var slots = Math.Min(list->AllocatedItemRendererListLength, 32);
-        for (var i = 0; i < slots; i++)
-            rows.Add($"{i}='{ReadListItemText(list, i)}'");
-        _log.Info($"[DD-PROBE] id={top->NodeId}: Sel={list->SelectedItemIndex} Len={list->ListLength} "
-                  + $"Slots={list->AllocatedItemRendererListLength} Zeilen=[{string.Join(", ", rows)}]");
-
-        var texts = new List<string>();
-        CollectProbeTexts((AtkComponentBase*)dd, texts, 0);
-        _log.Info($"[DD-PROBE] id={top->NodeId}: Texte=[{string.Join(" | ", texts)}]");
-    }
-
-    /// <summary>Every text node inside a component tree with id, visibility
-    /// and content (probe helper, depth-limited like ComponentContainsNode).</summary>
-    private static unsafe void CollectProbeTexts(AtkComponentBase* comp, List<string> into, int depth)
-    {
-        if (depth > 3) return;
-        for (var j = 0; j < comp->UldManager.NodeListCount; j++)
-        {
-            var c = comp->UldManager.NodeList[j];
-            if (c == null) continue;
-            if (c->Type == NodeType.Text)
-            {
-                var t = AtkText.Read((AtkTextNode*)c);
-                into.Add($"d{depth} id={c->NodeId} vis={c->IsVisible()} '{t}'");
-                continue;
-            }
-            if ((int)c->Type < 1000) continue;
-            var inner = ((AtkComponentNode*)c)->Component;
-            if (inner != null) CollectProbeTexts(inner, into, depth + 1);
-        }
     }
 
     /// <summary>True while the game's keyboard focus sits on one of the eight

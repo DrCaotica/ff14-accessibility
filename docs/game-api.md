@@ -1472,6 +1472,15 @@ hier um den Faktor neun.
   Node — ilspycmd-verifiziert gegen FFXIVClientStructs; Dump: aktiv F=0x2033 vs.
   ausgegraut F=0x2013 (z. B. Hintergrund-Wiedergabe-Unterpunkte bei Master AUS,
   und der „Anwenden"-Button vor einer Änderung).
+- Reiter-Bedienung (Log 2026-10-10 13:39-13:47): das 1. Bestaetigen auf einem
+  Reiter schaltet die Seite um, der Tastatur-Fokus BLEIBT auf dem Reiter; erst
+  das 2. Bestaetigen fuehrt in die Einstellungen. Auch der beim Oeffnen gezeigte
+  Reiter braucht beide Schritte. Reines Blaettern ueber die Reiter schaltet die
+  Seite NICHT um. Nach Reiter 8 folgt der Knopf „Voreinstellung" (Button, id=4).
+- Leere Auswahlliste: Anzeige → „Voreinstellungen" (DropDownList id=38) hatte
+  List.SelectedItemIndex=0, ListLength=1, alle Textknoten leer und F=0x2113
+  (Enabled geloescht) bei „Rahmenloses Fenster" (Sonde 2026-10-10 13:47:54).
+  Ansage „leer, ausgegraut". Ob die Sperre am Fenstermodus haengt: unbelegt.
 - Barrierefreiheit = Reiter 8 (DragDrop, Tooltip „Barrierefreiheit"). Seite schaltet
   beim NAVIGIEREN um und wird gelesen (Farbwahrnehmung/Töne visualisieren/Transparenz
   etc.). Enter wird in ConfigSystem vom Spiel geschluckt (IKeyState sieht es nicht) →
