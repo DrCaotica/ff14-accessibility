@@ -392,6 +392,11 @@ public static partial class AccessibilityStrings
     public static string ConfigSystem =>
         IsGerman ? "Systemeinstellungen" : "System Configuration";
 
+    /// <summary>Opening sentence of the system configuration: window name plus
+    /// the page it opened on (with its option count).</summary>
+    public static string ConfigSystemOpened(string page) =>
+        IsGerman ? $"Systemeinstellungen. {page}." : $"System Configuration. {page}.";
+
     public static string ConfigSystemSaved =>
         IsGerman ? "Einstellungen gespeichert" : "Settings saved";
 

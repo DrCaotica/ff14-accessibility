@@ -121,6 +121,12 @@ public sealed class UIReaderService : IDisposable
     private string _csLastTabText     = string.Empty;
     private readonly List<(uint NodeId, string Label)> _csTabs = [];
 
+    // Opening is ONE sentence, built in two steps (see OnConfigSystemOpen):
+    // the first recognised page says "Systemeinstellungen. <page>.", and the
+    // first tab position after it queues behind instead of cutting it off.
+    private bool _csOpenPending;
+    private bool _csQueueNextTabFocus;
+
     // Enter on a tab: remember WHICH tab we clicked so the page-change
     // announcement can state a truthful position ("Tab X von 8") - the
     // child-4 detection reported "Tab 8 von 8" on page 1 (log 2026-07-16
@@ -7595,24 +7601,33 @@ public sealed class UIReaderService : IDisposable
         ReadConfigSystemTabs(addon);
         var (tabIdx, tabLabel) = GetFocusedTabInfo(addon);
         _csLastTabIndex = tabIdx;
-        _csLastTabText  = tabLabel;
 
-        // Ansage: "Systemeinstellungen. [Seitenueberschrift.]" - OHNE Position.
-        // tabIdx ist hier nicht belegt: alle acht Reiter tragen denselben
+        // Hier wird NICHTS gesprochen. Die Seitenueberschrift ist zu diesem
+        // Zeitpunkt noch die alte: 12:52:19.235 las sie "Anzeigeeinstellungen",
+        // 1 ms spaeter im ersten Update stand "Sound" da - das Spiel oeffnet
+        // auf dem zuletzt benutzten Reiter (Log 2026-10-10). Gesprochen wurden
+        // drei Saetze in 15 ms, jeder unterbrechend; zu hoeren war nur der
+        // letzte ("Reiter 2 von 8.").
+        //
+        // Darum: _csLastTabText bleibt leer, so zaehlt die erste lesbare
+        // Ueberschrift im Update immer als Seitenwechsel - auch wenn das
+        // Fenster auf Reiter 1 oeffnet und der Text gleich bleibt. Dort kommt
+        // "Systemeinstellungen. <Seite>, N Einstellungen." und die erste
+        // Reiter-Position stellt sich dahinter an.
+        //
+        // tabIdx ist nicht belegt: alle acht Reiter tragen denselben
         // Child-4-Zustand ([CS-TAB] T7..T14 alle F=0x2FB3, eff=True), also
         // gewinnt immer der erste in der Knotenliste (id=14) und es hiess
         // "Anzeigeeinstellungen, Tab 8 von 8" auf Reiter 1 (Log 2026-10-05
         // 05:54:33 und 2026-10-10 12:37:32). ClientStructs hat weder Addon-
         // noch Agent-Struktur fuer ConfigSystem, und ConfigSystemNumberArray
         // aendert sich beim Reiterwechsel nicht ([CS-NUM] ohne Change-Zeile).
-        // Wie beim Reiterwechsel gilt: unbestaetigt nicht sprechen. Die
-        // Position sagt der Fokus-Leser, sobald man auf den Reitern steht.
-        _log.Info($"[CS] Oeffnen: Seite '{tabLabel}', Reiter-Index unbestaetigt (Erkennung lieferte {tabIdx + 1}).");
-        var sb = new StringBuilder(AccessibilityStrings.ConfigSystem);
-        if (!string.IsNullOrEmpty(tabLabel))
-            sb.Append($". {tabLabel}");
-        sb.Append(".");
-        _tolk.SpeakInterrupt(sb.ToString());
+        // Die Position kommt allein vom Tastatur-Fokus auf dem Reiter.
+        _csLastTabText       = string.Empty;
+        _csOpenPending       = true;
+        _csQueueNextTabFocus = false;
+        _log.Info($"[CS] Oeffnen: Ueberschrift beim Setup '{tabLabel}' (noch nicht gesprochen), "
+                  + $"Reiter-Index unbestaetigt (Erkennung lieferte {tabIdx + 1}).");
     }
 
     private void OnConfigSystemClose(AddonEvent type, AddonArgs args)
@@ -7621,6 +7636,8 @@ public sealed class UIReaderService : IDisposable
         _csTabs.Clear();
         _csLastTabIndex = -1;
         _csLastTabText  = string.Empty;
+        _csOpenPending       = false;
+        _csQueueNextTabFocus = false;
         _csTextChanges.Clear();
         _csLiveTexts.Clear();
         _lastTitleMenuText = string.Empty; // Dedup zur�cksetzen ? TitleMenu-Button wird neu angesagt
@@ -7805,7 +7822,16 @@ public sealed class UIReaderService : IDisposable
                 var pageOptions = CountVisibleConfigOptions(addon);
                 var pageLabel   = AccessibilityStrings.ConfigPageWithCount(tabLabel, pageOptions);
 
-                if (_csExpectedTabIdx >= 0)
+                if (_csOpenPending)
+                {
+                    // First readable page after opening: window name + page
+                    // in one sentence. The tab position follows queued.
+                    _csOpenPending       = false;
+                    _csQueueNextTabFocus = true;
+                    _log.Info($"[CS] Oeffnen -> Seite '{tabLabel}', {pageOptions} Einstellungen");
+                    _tolk.SpeakInterrupt(AccessibilityStrings.ConfigSystemOpened(pageLabel));
+                }
+                else if (_csExpectedTabIdx >= 0)
                 {
                     _log.Info($"[CS] Tab-Wechsel -> '{tabLabel}' [{_csExpectedTabIdx + 1}/{_csTabs.Count}] "
                               + $"(per Enter), {pageOptions} Einstellungen");
@@ -7991,8 +8017,14 @@ public sealed class UIReaderService : IDisposable
                 return; // has text (generic reader speaks it) or unknown - stay silent
         }
 
-        _log.Info($"[CS] Fokus (global): {desc}");
-        _tolk.SpeakInterrupt(desc);
+        // First tab position right after the opening sentence: queue behind
+        // it (Log 2026-10-10 12:52:19: it came 14 ms later and cut it off).
+        // Any other focus first ends the queueing - it is a new step.
+        var queue = _csQueueNextTabFocus && comp->GetComponentType() == ComponentType.DragDrop;
+        _csQueueNextTabFocus = false;
+        _log.Info($"[CS] Fokus (global): {desc}{(queue ? " (angehaengt an Oeffnen)" : string.Empty)}");
+        if (queue) _tolk.Speak(desc);
+        else       _tolk.SpeakInterrupt(desc);
     }
 
     /// <summary>Speech form of a config control value: percentage sliders (0..100)
