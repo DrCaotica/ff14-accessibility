@@ -1477,6 +1477,14 @@ hier um den Faktor neun.
   Immerse Spatial Audio" (Collision @1171,990). KEINE Einstellung hat einen Tooltip.
   Unbekannt: 24x24-Komponenten Comp(1032) CT=Base am rechten Rand jeder Zeile im Reiter
   Barrierefreiheit (z. B. id=579 @1247,496), ohne Tooltip-Bindung - Funktion nicht belegt.
+- Reiter Farbschema (Dump 2026-10-10 21:35): Ueberschrift Text 497 "Farbschema wählen",
+  Vorschaubild Image 501 (ConfigSystemUiSkin_hr1.tex) mit Bildtexten 500 "Vorschau" und
+  499 "Kühl und klassisch." (Schema-Beschreibung), Auswahlliste DropDownList 502 @717,544
+  (8 Schemata: Dunkel, Hell, Klassisch FF, Klares Blau/Weiß/Grün/Grau/Pink), zwei
+  textlose Knoepfe 503/504 (24x24) daneben - im Log nie im Tastaturfokus -, darunter
+  Erklaerungstext 505 @717,576 512x120. Einziges fokussierbares Element der Seite.
+  Text 499 aendert sich beim Blaettern in der offenen Liste NICHT (Log 21:50, Text-Scanner
+  ohne Meldung); ob er sich nach einer Auswahl aendert, ist nicht gemessen.
 - FALLE Doppel-Ansage (V5.58): Audio-Slider tragen den Wert als Text-Kind id=2
   („100"); der GENERISCHE Fokus-Leser las diese nackte Zahl ~14 ms nach der
   Config-Ansage und würgte das Label ab. Fix: nackte Zahlen überspringen, solange
