@@ -3146,3 +3146,14 @@ Erkennung weiter nur über Spieldaten (ENpcBase.ENpcData), keine Namen.
 
 Offline-Zählung sqpack EN: +~186 NPCs nur über Indirection, ~666 schon direkt.
 
+
+## Titelbildschirm: _TitleMenu und _TitleRevision (2026-10-10)
+
+- **_TitleMenu hat 6 Knoepfe** (Typ 1001, ids 4-9): Spiel starten, DATENZENTRUM,
+  Titel und Intro-Videos, Einstellungen, Lizenz, Beenden.
+- **Bei PostSetup ist IsReady=false** und die Knopftexte sind noch Vorlage
+  ('Eroeffnungssequenz', 'Systemkonfiguration', id=8 leer). Erst das erste
+  PostUpdate mit IsReady=true (~24 ms spaeter) traegt die echten Texte
+  (Sonde 2026-10-10 14:45:27.069 vs .093). Zaehlen/Lesen erst nach IsReady.
+- **_TitleRevision** (Versionszeile) wird ebenfalls nach dem Aufbau gefuellt;
+  der generische Scanner hielt das fuer eine Aenderung. Steht in HudNoiseAddons (stumm, User-Wahl).
