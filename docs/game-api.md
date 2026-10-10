@@ -260,7 +260,8 @@ Buttons an seinen Listener schicken — derselbe Pfad wie ein echter Mausklick.
     `CharaSelectSystemConfigMain` („Speichert UI-Größe, Bildfrequenz und andere
     Anzeigeeinstellungen.“)
   - Fokus-Reihenfolge: Welt auswählen → Neuer Charakter → id=6; Zeile (id=8) ↔ id=2
-  - **Plugin:** `TryReadCharaSelectIconButton` (eigene Loc-Namen, das Spiel liefert keinen)
+  - **Plugin:** `TryReadCharaSelectIconButton` (eigene Loc-Namen, das Spiel liefert keinen).
+    Kontextmenü der Zeile hat Spiel-Eintrag „Charaktereinstellungen sichern“ (ContextMenu, 14:35:57) → Wortlaut übernommen.
 - Wegenetz in der Lobby (Log 2026-10-10 14:28): im Titelmenü und in der
   Charakterauswahl meldet vnavmesh je einen ~30-ms-Aufbau. `TerritoryType` zeigt
   dort das Gebiet des zuletzt gespielten Charakters (133), `IsLoggedIn=False`,
