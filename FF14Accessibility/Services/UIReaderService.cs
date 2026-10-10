@@ -7837,19 +7837,32 @@ public sealed class UIReaderService : IDisposable
                     _log.Info($"[CS] Oeffnen -> Seite '{tabLabel}', {pageOptions} Einstellungen");
                     _tolk.SpeakInterrupt(AccessibilityStrings.ConfigSystemOpened(pageLabel));
                 }
-                else if (_csExpectedTabIdx >= 0)
-                {
-                    _log.Info($"[CS] Tab-Wechsel -> '{tabLabel}' [{_csExpectedTabIdx + 1}/{_csTabs.Count}] "
-                              + $"(per Enter), {pageOptions} Einstellungen");
-                    _tolk.SpeakInterrupt(AccessibilityStrings.TabPosition(pageLabel, _csExpectedTabIdx + 1, _csTabs.Count));
-                    _csLastTabIndex   = _csExpectedTabIdx;
-                    _csExpectedTabIdx = -1;
-                }
                 else
                 {
-                    _log.Info($"[CS] Tab-Wechsel -> '{tabLabel}' (Index unbestaetigt, child4 lieferte {tabIdx + 1}), "
-                              + $"{pageOptions} Einstellungen");
-                    _tolk.SpeakInterrupt(pageLabel);
+                    // The game switches the page on the FIRST confirm but keeps
+                    // the cursor on the tab; only a second confirm moves it into
+                    // the settings (log 2026-10-10 13:39:47 / 13:40:08 / 13:40:20:
+                    // page change, focus still on the tab; 13:40:22 second
+                    // confirm -> "Töne visualisieren"). A sighted player sees the
+                    // cursor stay on the tab, so say it - but only while the
+                    // focus really is on a tab.
+                    var onTab = IsConfigTabFocused(addon);
+                    if (_csExpectedTabIdx >= 0)
+                    {
+                        _log.Info($"[CS] Tab-Wechsel -> '{tabLabel}' [{_csExpectedTabIdx + 1}/{_csTabs.Count}] "
+                                  + $"(per Enter), {pageOptions} Einstellungen, Fokus auf Reiter={onTab}");
+                        pageLabel = AccessibilityStrings.TabPosition(pageLabel, _csExpectedTabIdx + 1, _csTabs.Count);
+                        _csLastTabIndex   = _csExpectedTabIdx;
+                        _csExpectedTabIdx = -1;
+                    }
+                    else
+                    {
+                        _log.Info($"[CS] Tab-Wechsel -> '{tabLabel}' (Index unbestaetigt, child4 lieferte {tabIdx + 1}), "
+                                  + $"{pageOptions} Einstellungen, Fokus auf Reiter={onTab}");
+                    }
+                    _tolk.SpeakInterrupt(onTab
+                        ? AccessibilityStrings.ConfigPageConfirmAgain(pageLabel)
+                        : pageLabel);
                 }
                 LogTabMarkerProbe(addon); // [CS-TAB]: welcher Reiter traegt den Aktiv-Marker?
             }
@@ -8005,6 +8018,8 @@ public sealed class UIReaderService : IDisposable
                     _log.Info($"[CS] Aufklappfeld id={top->NodeId} ohne lesbaren Wert - stumm.");
                     return;
                 }
+                if (dropdown.Value.Length == 0)
+                    LogEmptyDropDownProbe((AtkComponentDropDownList*)comp, top);
                 _csFocusValue = dropdown.Value;
                 desc = dropdown.Text;
                 break;
@@ -8036,6 +8051,68 @@ public sealed class UIReaderService : IDisposable
         _log.Info($"[CS] Fokus (global): {desc}{(queue ? " (angehaengt an Oeffnen)" : string.Empty)}");
         if (queue) _tolk.Speak(desc);
         else       _tolk.SpeakInterrupt(desc);
+    }
+
+    /// <summary>
+    /// [DD-PROBE] Diagnostic for a closed drop-down whose stored value reads
+    /// empty ("Voreinstellungen, Auswahlliste, ." in the display tab, log
+    /// 2026-10-10 13:40:14): logs the list's index/length fields, every
+    /// renderer row's text and every text node inside the drop-down, so the
+    /// real source of the shown value can be chosen from data, not guessed.
+    /// </summary>
+    private unsafe void LogEmptyDropDownProbe(AtkComponentDropDownList* dd, AtkResNode* top)
+    {
+        var list = dd->List;
+        if (list == null)
+        {
+            _log.Info($"[DD-PROBE] id={top->NodeId}: List=null");
+            return;
+        }
+        var rows = new List<string>();
+        var slots = Math.Min(list->AllocatedItemRendererListLength, 32);
+        for (var i = 0; i < slots; i++)
+            rows.Add($"{i}='{ReadListItemText(list, i)}'");
+        _log.Info($"[DD-PROBE] id={top->NodeId}: Sel={list->SelectedItemIndex} Len={list->ListLength} "
+                  + $"Slots={list->AllocatedItemRendererListLength} Zeilen=[{string.Join(", ", rows)}]");
+
+        var texts = new List<string>();
+        CollectProbeTexts((AtkComponentBase*)dd, texts, 0);
+        _log.Info($"[DD-PROBE] id={top->NodeId}: Texte=[{string.Join(" | ", texts)}]");
+    }
+
+    /// <summary>Every text node inside a component tree with id, visibility
+    /// and content (probe helper, depth-limited like ComponentContainsNode).</summary>
+    private static unsafe void CollectProbeTexts(AtkComponentBase* comp, List<string> into, int depth)
+    {
+        if (depth > 3) return;
+        for (var j = 0; j < comp->UldManager.NodeListCount; j++)
+        {
+            var c = comp->UldManager.NodeList[j];
+            if (c == null) continue;
+            if (c->Type == NodeType.Text)
+            {
+                var t = AtkText.Read((AtkTextNode*)c);
+                into.Add($"d{depth} id={c->NodeId} vis={c->IsVisible()} '{t}'");
+                continue;
+            }
+            if ((int)c->Type < 1000) continue;
+            var inner = ((AtkComponentNode*)c)->Component;
+            if (inner != null) CollectProbeTexts(inner, into, depth + 1);
+        }
+    }
+
+    /// <summary>True while the game's keyboard focus sits on one of the eight
+    /// category tabs (DragDrop components, node ids 7-14).</summary>
+    private static unsafe bool IsConfigTabFocused(AtkUnitBase* addon)
+    {
+        var stage = AtkStage.Instance();
+        if (stage == null || stage->AtkInputManager == null) return false;
+        var focus = stage->AtkInputManager->FocusedNode;
+        if (focus == null) return false;
+        var top = FindTopLevelOwner(addon, focus, out _);
+        if (top == null || (int)top->Type < 1000 || top->NodeId is < 7 or > 14) return false;
+        var comp = ((AtkComponentNode*)top)->Component;
+        return comp != null && comp->GetComponentType() == ComponentType.DragDrop;
     }
 
     /// <summary>Speech form of a config control value: percentage sliders (0..100)

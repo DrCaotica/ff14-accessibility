@@ -1734,6 +1734,14 @@ public static partial class AccessibilityStrings
             ? $"{heading}, {count} {(count == 1 ? "Einstellung" : "Einstellungen")}"
             : $"{heading}, {count} {(count == 1 ? "setting" : "settings")}";
 
+    /// <summary>Page switched while the cursor is still on its tab. The game
+    /// needs a second confirm to move the cursor into the settings (log
+    /// 2026-10-10); a sighted player sees the cursor stay on the tab.</summary>
+    public static string ConfigPageConfirmAgain(string page) =>
+        IsGerman
+            ? $"{page}. Erneut bestätigen für die Einstellungen."
+            : $"{page}. Confirm again to enter the settings.";
+
     public static string TabPressedNoPageChange => IsGerman ? "Reiter gedrückt, aber kein Seitenwechsel erkannt." : "Tab pressed, but no page change detected.";
     public static string TabNotResponding => IsGerman ? "Reiter reagiert nicht." : "Tab not responding.";
 
