@@ -1436,8 +1436,9 @@ public sealed class UIReaderService : IDisposable
     {
         if (InLoginQuiet) return;
         var name = args.AddonName;
-        // SpecialUpdateAddons �berspringen, au�er ConfigSystem und TitleDCWorldMap (die wir jetzt universell behandeln)
-        if (SpecialUpdateAddons.Contains(name) && name != "ConfigSystem" && name != "TitleDCWorldMap") return;
+        // SpecialUpdateAddons überspringen, außer ConfigSystem (eigener Handler
+        // weiter unten). TitleDCWorldMap bedient allein OnDCWorldMapReceive.
+        if (SpecialUpdateAddons.Contains(name) && name != "ConfigSystem") return;
 
         var currentAddon = (AtkUnitBase*)(nint)args.Addon;
         if (currentAddon == null || !currentAddon->IsVisible) return;
@@ -1454,7 +1455,7 @@ public sealed class UIReaderService : IDisposable
             return;
         }
 
-        // ConfigSystem: eigene Fokus-Logik, l�uft VOR dem generischen FindFocusedText
+        // ConfigSystem: eigene Fokus-Logik, kein generischer Listen-/Scanner-Pfad
         if (name == "ConfigSystem")
         {
             AnnounceConfigSystemFocusIfChanged(currentAddon);
@@ -1482,47 +1483,15 @@ public sealed class UIReaderService : IDisposable
         // (per Configuration.cs abschaltbar) fuer _StatusCustom0/_FlyText.
         if (IsSuppressedAddon(name)) return;
 
-        // 1. Universeller Fokus-Check (funktioniert f�r Buttons, Tabs, etc.)
-        var res = FindFocusedText(currentAddon);
-        if (!string.IsNullOrEmpty(res.Text))
-        {
-            // Clock-insensitive dedup: a focused line whose only change is a
-            // running clock ("0:04" -> "0:05") must not be announced again every
-            // second. The global focus reader already has this guard through
-            // StripLiveClocks (_lastFocusedNodeStable); this per-addon path did
-            // not, which is what made the duty-finder queue line unbearable.
-            if (!_lastFocusByAddon.TryGetValue(name, out var last)
-                || res.Key != last.Key || !SameIgnoringClocks(res.Text, last.Text))
-            {
-                _lastFocusByAddon[name] = (res.Key, res.Text);
-                _log.Info($"[Accessibility] {name} Fokus: {res.Text} (Key={res.Key})");
-                
-                var announceText = res.Text;
+        // Kein Fokus-Leser in diesem Pfad. Den echten Tastatur-Fokus
+        // (AtkInputManager.FocusedNode) liest UpdateGlobalFocus jeden Frame.
+        // Der fruehere FindFocusedText hielt NodeFlags 0x100 fuer ein Fokus-Bit;
+        // laut ClientStructs ist es HasCollision (0x10 = Visible). Er lieferte
+        // deshalb den ersten anklickbaren Knoten, meist den Fensterrahmen, und
+        // sprach ihn unterbrechend: Fenstertitel doppelt, "ARSENAL" direkt nach
+        // jeder Kategorie, Effekt-Popups von Mitspielern (Log 2026-10-04..10).
 
-                // Spezialfall Datenzentrum: Wenn wir einen Tab fokussieren, 
-                // wollen wir die DCs dazu h�ren (falls vorhanden).
-                if (name == "TitleDCWorldMap")
-                {
-                    var panelMatch = _dcTabPanels.FirstOrDefault(p => p.Region.Contains(announceText, StringComparison.OrdinalIgnoreCase));
-                    if (panelMatch.DCs != null && panelMatch.DCs.Count > 0)
-                        announceText = $"{announceText}: {string.Join(", ", panelMatch.DCs.Select(d => d.Name))}";
-                }
-
-                _tolk.SpeakInterrupt(announceText);
-                
-                // Wir f�hren KEIN return aus, damit Listen-Navigation oder Text-Scanner
-                // f�r den Rest des Fensters noch laufen k�nnen.
-            }
-        }
-
-        // 2. Spezial-Logik f�r Datenzentrum (Panel-Sichtbarkeit als Fallback)
-        if (name == "TitleDCWorldMap")
-        {
-            AnnounceDCFocus();
-            return;
-        }
-
-        // 4. Klassische Listen-Navigation: alle Index-Kandidaten beobachten
+        // Klassische Listen-Navigation: alle Index-Kandidaten beobachten
         // (siehe _listIndexState-Kommentar; SelectedItemIndex allein war tot)
         if (_menuStack.Count > 0 && _menuStack.Peek().Name == name)
         {
@@ -1538,7 +1507,7 @@ public sealed class UIReaderService : IDisposable
         if (name == "_CharaSelectListMenu")
             TickCharaSelectAnnounce();
 
-        // 5. Generischer Text-Scanner (f�r �nderungen im Addon-Inhalt)
+        // Generischer Text-Scanner (f�r �nderungen im Addon-Inhalt)
         if (_noListCache.Contains(name) && !IsSuppressedAddon(name))
         {
             // Some menus build their list only AFTER PostSetup (SystemMenu:
@@ -1569,9 +1538,10 @@ public sealed class UIReaderService : IDisposable
     // 64/65/66 = TimerTick/TimerEnd/TimerStart, 74 = TimelineActiveLabelChanged
     // (AtkEventType, ilspycmd): pure animation/timer noise - _LimitBreak alone
     // fired 74 three times per frame in-game and flooded the log (2026-07-10).
-    // 7 = MouseOut: leaving a tile must not fall through to FindFocusedText
-    // (XBMMonsterNotebook Log 2026-09-25: MouseOut → „BESTIENBUCH“, MouseOver →
-    // „Nr. 1“, Spam). Next MouseOver / global focus announces the new target.
+    // 7 = MouseOut: leaving a tile announced the window frame through the old
+    // flag-based focus fallback (XBMMonsterNotebook Log 2026-09-25: MouseOut →
+    // „BESTIENBUCH“, MouseOver → „Nr. 1“, Spam). Next MouseOver / global focus
+    // announces the new target.
     private static readonly HashSet<byte> IgnoredEventTypes = [3, 4, 5, 7, 12, 14, 15, 16, 17, 23, 24, 64, 65, 66, 74];
 
     private unsafe void OnAnyAddonReceive(AddonEvent type, AddonArgs args)
@@ -1591,25 +1561,13 @@ public sealed class UIReaderService : IDisposable
         _log.Info($"[Accessibility] {name} ReceiveEvent: type={recv.AtkEventType} param={recv.EventParam}");
 
         // For real navigation events (MouseOver / ButtonClick) the AtkEvent
-        // pointer names the exact hovered/clicked component and takes priority.
-        // The flag-based FindFocusedText below can latch onto a stale highlight
-        // - e.g. _CharaMakeRaceGender, where every race node keeps a static
-        // collision bit, so FindFocusedText always returned the same race and
-        // the dedup silenced navigation (log 2026-07-09 21:43-21:45).
-        if ((int)recv.AtkEventType is 6 or 25
-            && TryAnnounceEventTarget(name, addon, recv.AtkEvent, interrupt: (int)recv.AtkEventType == 6))
-            return;
-
-        var (focused, nodeId) = FindFocusedText(addon);
-        if (!string.IsNullOrEmpty(focused))
-        {
-            if (!_lastFocusByAddon.TryGetValue(name, out var last)
-                || nodeId != last.Key || focused != last.Text)
-            {
-                _lastFocusByAddon[name] = (nodeId, focused);
-                _tolk.SpeakInterrupt(focused);
-            }
-        }
+        // pointer names the exact hovered/clicked component. There is no
+        // fallback: the former flag-based FindFocusedText read NodeFlags 0x100,
+        // which is HasCollision, not focus - it latched onto the first clickable
+        // node (_CharaMakeRaceGender: always the same race, log 2026-07-09
+        // 21:43-21:45). Keyboard focus is UpdateGlobalFocus' job.
+        if ((int)recv.AtkEventType is 6 or 25)
+            TryAnnounceEventTarget(name, addon, recv.AtkEvent, interrupt: (int)recv.AtkEventType == 6);
     }
 
     /// <summary>
@@ -1620,8 +1578,8 @@ public sealed class UIReaderService : IDisposable
     /// </summary>
     /// <returns>
     /// True if the event pointer was resolved to a component (announced or
-    /// suppressed by dedup). False when no mapping/text was found, so the
-    /// caller can fall back to the flag-based FindFocusedText.
+    /// suppressed by dedup). False when no mapping/text was found; every such
+    /// exit logs its reason.
     /// </returns>
     private unsafe bool TryAnnounceEventTarget(string addonName, AtkUnitBase* addon, nint atkEventPtr, bool interrupt)
     {
@@ -7757,7 +7715,7 @@ public sealed class UIReaderService : IDisposable
     private readonly Dictionary<uint, ushort> _csOptionFlags = [];
 
     /// <summary>
-    /// Wird jeden PostUpdate-Frame f�r ConfigSystem aufgerufen (statt generischem FindFocusedText).
+    /// Wird jeden PostUpdate-Frame f�r ConfigSystem aufgerufen (statt des generischen Update-Pfads).
     /// Pr�ft Tab-Fokus, sagt Tab-Wechsel an, scannt Wert-�nderungen.
     /// Parallel: [CS-OPT]-Logger meldet Flag-�nderungen an Options-Nodes (Diag2).
     /// </summary>
@@ -7838,27 +7796,18 @@ public sealed class UIReaderService : IDisposable
 
         // 1.5: Textlose Controls über den GLOBALEN Fokus ansagen. Slider,
         // DropDownLists und die Reiter tragen KEINEN Text (Probe [CS-OPT]:
-        // Slider/DropDown = ""), FindFocusedText unten sucht zudem nur nach
-        // dem Fokus-BIT an den Nodes - die Tastatur bewegt aber den
+        // Slider/DropDown = ""), der fruehere FindFocusedText suchte zudem nur
+        // ein vermeintliches Fokus-BIT an den Nodes - die Tastatur bewegt aber den
         // AtkInputManager.FocusedNode (V4.35-Erkenntnis). Ergebnis war
         // Stille bei Pfeiltasten (User-Log 2026-07-16 15:52: Fokus wanderte
         // zwischen zwei Slidern, Text=''). Labels stehen als eigener
         // Top-Level-Text DIREKT VOR dem Control in der Node-Liste
         // (Dump: "Transparenz" vor Slider id=570, "Größe" vor id=566).
+        // Controls MIT Text (CheckBox, RadioButton, Fussleisten-Knoepfe) sagt
+        // UpdateGlobalFocus an ([Focus] addon='ConfigSystem' ... "Schalter, aus").
+        // Der fruehere flag-basierte Schritt hier (FindFocusedText, 0x100 =
+        // HasCollision) fand nur den Fensterrahmen ("SYSTEMKONFIGURATION").
         AnnounceConfigGlobalFocus(addon);
-
-        // 2. Fokus auf Optionen (CheckBox, Slider, etc.) prüfen
-        var (focused, nodeId) = FindFocusedText(addon);
-        if (!string.IsNullOrEmpty(focused))
-        {
-            if (!_lastFocusByAddon.TryGetValue("ConfigSystem", out var last)
-                || nodeId != last.Key || focused != last.Text)
-            {
-                _lastFocusByAddon["ConfigSystem"] = (nodeId, focused);
-                _log.Info($"[CS] Fokus-Wechsel: {focused} (Key={nodeId})");
-                _tolk.SpeakInterrupt(focused);
-            }
-        }
 
         // 3. Wert-Änderungen in Text-Nodes scannen und ansagen
         ScanConfigSystemTexts(addon);
@@ -14241,65 +14190,6 @@ public sealed class UIReaderService : IDisposable
         _log.Info($"[RecipeProbe] {line}");
     }
 #endif
-
-    /// <summary>
-    /// Findet den Node mit dem Fokus-Flag (HasFocusBit) oder relevanten Hover-Effekten.
-    /// R�ckgabe: (Text, Key)
-    /// </summary>
-    private unsafe (string? Text, uint Key) FindFocusedText(AtkUnitBase* addon)
-    {
-        const ushort HasFocusBit = 0x100;
-        const ushort HasCollisionBit = 0x10;
-
-        // 1. Durchlauf: Echter Fokus (0x100) auf Top-Level oder in Kindern
-        for (var i = 0; i < addon->UldManager.NodeListCount; i++)
-        {
-            var node = addon->UldManager.NodeList[i];
-            if (node == null || !node->IsVisible()) continue;
-
-            if (((ushort)node->NodeFlags & HasFocusBit) != 0)
-                return (GetTextFromNodeTree(node), node->NodeId);
-
-            if ((int)node->Type >= 1000)
-            {
-                var comp = ((AtkComponentNode*)node)->Component;
-                if (comp != null)
-                {
-                    for (var j = 0; j < comp->UldManager.NodeListCount; j++)
-                    {
-                        var child = comp->UldManager.NodeList[j];
-                        // Wenn ein Kind-Node den Fokus hat, nehmen wir den Text des ganzen Komponenten-Nodes
-                        if (child != null && child->IsVisible() && ((ushort)child->NodeFlags & HasFocusBit) != 0)
-                            return (GetTextFromNodeTree(node), node->NodeId * 1000 + child->NodeId);
-                    }
-                }
-            }
-        }
-
-        // 2. Durchlauf: Fallback auf Collision (0x10) f�r statische Men�s (z.B. TitleDCWorldMap)
-        // Wir suchen hier nur nach dem Glow auf Kind 4, um Fehlalarme zu vermeiden.
-        for (var i = 0; i < addon->UldManager.NodeListCount; i++)
-        {
-            var node = addon->UldManager.NodeList[i];
-            if (node == null || !node->IsVisible() || (int)node->Type < 1000) continue;
-
-            var comp = ((AtkComponentNode*)node)->Component;
-            if (comp == null) continue;
-
-            for (var j = 0; j < comp->UldManager.NodeListCount; j++)
-            {
-                var child = comp->UldManager.NodeList[j];
-                if (child != null && child->IsVisible() && child->NodeId == 4 && ((ushort)child->NodeFlags & HasCollisionBit) != 0)
-                {
-                    var text = GetTextFromNodeTree(node);
-                    if (!string.IsNullOrWhiteSpace(text) && text.Length > 1)
-                        return (text, node->NodeId * 1000 + child->NodeId);
-                }
-            }
-        }
-
-        return (null, 0);
-    }
 
     /// <summary>
     /// Rekursive Text-Extraktion aus einem beliebigen Node-Baum.
