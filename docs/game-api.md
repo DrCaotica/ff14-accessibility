@@ -250,6 +250,22 @@ Buttons an seinen Listener schicken — derselbe Pfad wie ein echter Mausklick.
   `HudNoiseAddons`; eine Ansage aus List-Nav = Name + Job/Stufe + Ort
   (`BeginCharaSelectAnnounce` / `TickCharaSelectAnnounce`, wartet bis Info-
   Name zum Listeneintrag passt).
+- `_CharaSelectListMenu` Bildknöpfe (Dump + Log 2026-10-10): zwei Comp(1007)-Knöpfe
+  nur mit Collision/Res/Image (`ConfigBackUp_hr1.tex`), KEIN Text, KEIN Tooltip
+  (Sonde: Knoten + 4 Eltern, alle leer).
+  - id=2 in jeder Charakterzeile (Eltern Comp(1011) ListItemRenderer, rechts neben
+    dem Namen) → öffnet `CharaSelectCharaConfigMain` („Charakterkonfig.“, „Speichert
+    die Einstellungen für Maus und Gamepad.“)
+  - id=6 direkt unter der Wurzel, rechts neben „Neuer Charakter“ → öffnet
+    `CharaSelectSystemConfigMain` („Speichert UI-Größe, Bildfrequenz und andere
+    Anzeigeeinstellungen.“)
+  - Fokus-Reihenfolge: Welt auswählen → Neuer Charakter → id=6; Zeile (id=8) ↔ id=2
+  - **Plugin:** `TryReadCharaSelectIconButton` (eigene Loc-Namen, das Spiel liefert keinen)
+- Wegenetz in der Lobby (Log 2026-10-10 14:28): im Titelmenü und in der
+  Charakterauswahl meldet vnavmesh je einen ~30-ms-Aufbau. `TerritoryType` zeigt
+  dort das Gebiet des zuletzt gespielten Charakters (133), `IsLoggedIn=False`,
+  `LocalPlayer=null`. Beim Einloggen startete der echte Aufbau 0,4–0,8 s nach dem
+  Login. **Plugin:** Wegenetz-Ansagen nur mit `LocalPlayer != null`.
 - `SelectYesno` wird mit wechselnden Knopf-Texten wiederverwendet (Ok/Abbrechen):
   sichtbare Knöpfe Comp(1005) id=8 (Bestätigen) / id=11 (Abbrechen);
   HoldButton-Duplikate ids 9/12/15 unsichtbar; Window-Komponente (CT=Window(2))
