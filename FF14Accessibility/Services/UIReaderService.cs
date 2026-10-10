@@ -109,6 +109,8 @@ public sealed class UIReaderService : IDisposable
     private string _lastTitleMenuText = string.Empty;
     private string _lastRewardLog     = string.Empty;
     private int _lastTitleMenuIndex = -1;
+    // _TitleMenu opened before IsReady: the opening line waits for the first ready update.
+    private bool _titleMenuOpenPending;
     // Gesetzt bei InputReceived � Dump wird im n�chsten PostUpdate ausgef�hrt,
     // NACHDEM das Spiel intern den Fokus verschoben hat (nicht davor).
     private bool _dumpOnNextTitleMenuUpdate;
@@ -372,6 +374,11 @@ public sealed class UIReaderService : IDisposable
         // List-Navigation (_CharaSelectListMenu): Name + Job/Stufe + Ort —
         // siehe BeginCharaSelectAnnounce / TickCharaSelectAnnounce.
         "_CharaSelectDetail", "_CharaSelectInfo",
+        // _TitleRevision: Versionszeile unten im Titelbildschirm. Das Spiel fuellt
+        // sie erst nach dem Aufbau, der Scanner sprach sie als "Aenderung" mit
+        // SpeakInterrupt und schnitt die Hauptmenue-Ansage ab (Log 2026-10-10
+        // 14:45:27.167). User-Wahl 2026-10-10: stumm.
+        "_TitleRevision",
     ];
 
     // Seit V4.60/61 im Log dokumentierte, aber noch nicht gefixte Spam-Quellen
@@ -3473,6 +3480,20 @@ public sealed class UIReaderService : IDisposable
         // TabIndex zu wechseln (User 2026-09-20: Inhalt blieb bei Ausrüstungssets).
         // OnCharacterUpdate ruft SetTab und sagt die Karte an — hier stumm.
         if (IsCharacterTabRadioFocus(node))
+        {
+            _lastFocusedNodePtr  = (nint)node;
+            _lastFocusedNodeText   = string.Empty;
+            _lastFocusedNodeStable = string.Empty;
+            _lastFocusedItemName = string.Empty;
+            return;
+        }
+
+        // Titel-Hauptmenue: AnnounceTitleMenuFocusIfChanged sagt jeden Schritt mit
+        // Position an ("DATENZENTRUM, 2 von 6"). Der generische Leser sprach den
+        // nackten Knopfnamen dazu - beim Blaettern 1 ms davor (sofort ueberdeckt),
+        // beim Oeffnen ~80 ms DANACH, und schnitt so "Hauptmenü. Spiel starten,
+        // 1 von 6" ab (Log 2026-10-10 14:45:27.074 / .164).
+        if (IsAddonVisible("_TitleMenu") && FindAddonNameForNode(node) == "_TitleMenu")
         {
             _lastFocusedNodePtr  = (nint)node;
             _lastFocusedNodeText   = string.Empty;
@@ -7499,6 +7520,24 @@ public sealed class UIReaderService : IDisposable
             }
         }
 
+        // At PostSetup the buttons still carry their layout texts
+        // ("Eröffnungssequenz", "Systemkonfiguration", one empty) - the real
+        // labels arrive one frame later together with IsReady (probe log
+        // 2026-10-10 14:45:27.069 vs .093). Counting now said "1 von 5" for a
+        // six-button menu, so the opening line waits for the first ready update.
+        if (!addon->IsReady)
+        {
+            _titleMenuOpenPending = true;
+            _log.Info("[Accessibility] _TitleMenu noch nicht bereit (IsReady=false), Eroeffnung wartet.");
+            return;
+        }
+
+        AnnounceTitleMenuOpening(addon);
+    }
+
+    /// <summary>Opening line of the title menu: "Hauptmenü. item, n von m".</summary>
+    private unsafe void AnnounceTitleMenuOpening(AtkUnitBase* addon)
+    {
         // Men�-Eintr�ge lesen und ansagen
         var selection = GetTitleMenuSelection(addon);
         if (selection.Count <= 0 || string.IsNullOrWhiteSpace(selection.Item))
@@ -12309,6 +12348,7 @@ public sealed class UIReaderService : IDisposable
 
     private void ResetTitleMenuState()
     {
+        _titleMenuOpenPending = false;
         _titleMenuItems.Clear();
         _lastTitleMenuText = string.Empty;
         _lastTitleMenuIndex = -1;
@@ -12327,6 +12367,14 @@ public sealed class UIReaderService : IDisposable
 
     private unsafe void AnnounceTitleMenuFocusIfChanged(AtkUnitBase* addon)
     {
+        if (_titleMenuOpenPending)
+        {
+            if (!addon->IsReady) return;
+            _titleMenuOpenPending = false;
+            AnnounceTitleMenuOpening(addon);
+            return;
+        }
+
         // Dump NACH PostUpdate (Spiel hat Fokus bereits intern verschoben)
         if (_dumpOnNextTitleMenuUpdate)
         {
