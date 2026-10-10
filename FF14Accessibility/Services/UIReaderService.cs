@@ -15453,6 +15453,16 @@ public sealed class UIReaderService : IDisposable
         // sie am Dump nicht zu beantworten - die Beschriftungssuche lief deshalb
         // jahrelang ueber die Knotenreihenfolge und lag im Grafik-Reiter
         // durchgehend eine Einstellung daneben (siehe ConfigLabelByGeometry).
+        // Der gebundene Tooltip ebenso: er haengt nicht immer am fokussierten
+        // Knoten, sondern auch an Beschriftungen oder Containern, und nur der
+        // Dump zeigt, WO ein Fenster ihn bindet.
+        var tip = _tooltips.TryGetTooltip(node);
+        if (tip != null)
+        {
+            tip = tip.Replace("\n", "?");
+            if (tip.Length > 80) tip = tip[..80] + "…";
+            extra += $" tip=\"{tip}\"";
+        }
         sb.AppendLine($"{indent}[{index}] id={node->NodeId} {typeName} F=0x{flags:X4} {vis} "
                       + $"@{node->ScreenX:0},{node->ScreenY:0} {node->Width}x{node->Height}{extra}");
 
