@@ -1463,6 +1463,20 @@ hier um den Faktor neun.
   ansagen. `NearestPrecedingLabel` findet z. B. „Hauptlautstärke" vor Slider id=113.
   KURZFORM für 0..100-Slider: „Label, Wert %" (kein „Regler, von 0 bis 100" —
   die Langform wurde beim schnellen Navigieren abgeschnitten, User 2026-07-27).
+- KORREKTUR (Dump 2026-10-10 21:35, mit Koordinaten): der Name eines Reglers steht
+  RECHTS hinter dem Regler, nicht davor. Reiter Sound: Regler id=113 @715 (220 breit),
+  Stumm-CheckBox Comp(1027) id=114 @933, Text "Hauptlautstärke" id=115 @961; ebenso
+  Hintergrundmusik/Soundeffekte/Stimmen/Systemtöne/Umgebungsgeräusche/Bardenkompositionen
+  (117..137), "Eigene"/"Gruppenmitglieder"/"Andere" (143/146/149) und "Systemtöne über
+  Lautsprecher" (157). Reiter Barrierefreiheit: "Größe"/"Transparenz"/"Stärke" @961 hinter
+  den Reglern @735. Die Block-Ueberschrift ("Lautstärkeeinstellungen") steht darueber.
+  Regler "Simulierung der Geräuschquelle" (id=107): Name darueber (id=106), unter dem
+  Regler die Endpunkte "Bei Kamera" (id=108, links) und "Bei Charakter" (id=109, rechts).
+- Tooltips (Dump 2026-10-10 21:35 mit tip-Spalte, alle 8 Seiten im Dump): das Spiel
+  bindet in ConfigSystem NUR 9 Tooltips - die 8 Reiter und den Knopf "Lerne mehr über
+  Immerse Spatial Audio" (Collision @1171,990). KEINE Einstellung hat einen Tooltip.
+  Unbekannt: 24x24-Komponenten Comp(1032) CT=Base am rechten Rand jeder Zeile im Reiter
+  Barrierefreiheit (z. B. id=579 @1247,496), ohne Tooltip-Bindung - Funktion nicht belegt.
 - FALLE Doppel-Ansage (V5.58): Audio-Slider tragen den Wert als Text-Kind id=2
   („100"); der GENERISCHE Fokus-Leser las diese nackte Zahl ~14 ms nach der
   Config-Ansage und würgte das Label ab. Fix: nackte Zahlen überspringen, solange
