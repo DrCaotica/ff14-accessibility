@@ -4051,6 +4051,28 @@ public sealed class UIReaderService : IDisposable
             return notice.Length == 0 ? text : AccessibilityStrings.HudRegionWith(text, notice);
         }
 
+        if (addonName == "ScenarioTree")
+        {
+            var owner = FindTopLevelOwner(addon, node, out _);
+            if (owner == null) return text;
+            if (owner->NodeId == ScenarioTreeMsqButtonId)
+            {
+                // The heading above the entry says whether the quest is accepted
+                // ("Aktueller ...") or still to be picked up ("Nächster ...").
+                var heading = ReadAddonNodeText(addon, ScenarioTreeHeadingId);
+                return heading.Length == 0 ? text : AccessibilityStrings.ScenarioTreeEntry(heading, text);
+            }
+            if (owner->NodeId is ScenarioTreeJobQuestButtonId or ScenarioTreeJobQuest2ButtonId)
+            {
+                // No text names this row on screen - its icon marks it as a job
+                // quest. The game's own name for that kind of quest is the
+                // quest's journal genre ("Mönch-Jobaufträge").
+                var genre = ScenarioTreeJobQuestGenre(text);
+                return genre.Length == 0 ? text : AccessibilityStrings.ScenarioTreeEntry(genre, text);
+            }
+            return text;
+        }
+
         if (addonName == "_NaviMap")
         {
             var owner = FindTopLevelOwner(addon, node, out _);
@@ -4078,6 +4100,42 @@ public sealed class UIReaderService : IDisposable
         }
 
         return text;
+    }
+
+    // ScenarioTree (dump 2026-10-11 13:46): heading Text id=11 ("Aktueller
+    // Hauptszenario-Auftrag", Addon 5671; 5670 = "Nächster ..."), main scenario
+    // entry Button id=13, job quest entries Button id=7 (visible, "Ätherische
+    // Harmonie") and id=8 (hidden, empty). Numpad2 moves from 13 to 7; NUM0 on
+    // either opens the map (log 13:44:17 / 13:50:06). AgentScenarioTreeData
+    // documents CommandType 3 = MSQ on map, 4 = job quest on map.
+    private const uint ScenarioTreeHeadingId        = 11;
+    private const uint ScenarioTreeMsqButtonId      = 13;
+    private const uint ScenarioTreeJobQuestButtonId  = 7;
+    private const uint ScenarioTreeJobQuest2ButtonId = 8;
+
+    /// <summary>
+    /// Journal genre of the job quest the scenario guide shows under
+    /// <paramref name="questName"/> ("Mönch-Jobaufträge"), taken from
+    /// AgentScenarioTreeData.JobQuestIds. Empty when no listed job quest has that
+    /// name - the id is only trusted when it names the same quest as the row.
+    /// </summary>
+    private unsafe string ScenarioTreeJobQuestGenre(string questName)
+    {
+        var agent = AgentScenarioTree.Instance();
+        if (agent == null || agent->Data == null || questName.Length == 0) return string.Empty;
+        var quests = _data.GetExcelSheet<Lumina.Excel.Sheets.Quest>();
+        foreach (var id in agent->Data->JobQuestIds)
+        {
+            if (id == 0) continue;
+            // Agent quest ids are the Quest sheet row minus 0x10000 (66600 =
+            // "Ätherische Harmonie" = job quest id 1064, offline sheet 2026-10-11).
+            if (!quests.TryGetRow(id + 0x10000u, out var quest)) continue;
+            if (quest.Name.ExtractText() != questName) continue;
+            return quest.JournalGenre.ValueNullable?.Name.ExtractText() ?? string.Empty;
+        }
+        _log.Info($"[HudFocus] Szenario-Leitfaden: keine Job-Quest '{questName}' in JobQuestIds "
+                  + $"[{string.Join(",", agent->Data->JobQuestIds.ToArray())}]");
+        return string.Empty;
     }
 
     /// <summary>One string of a game string array, empty (and logged) when the

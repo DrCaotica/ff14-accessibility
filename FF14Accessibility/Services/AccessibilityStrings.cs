@@ -1743,6 +1743,11 @@ public static partial class AccessibilityStrings
     public static string HudRegionDutyList  => IsGerman ? "Auftragsliste" : "Duty list";
     public static string HudRegionMiniMap   => IsGerman ? "Mini-Map" : "Mini-map";
 
+    /// <summary>Scenario guide entry with what kind of quest it is: the game's
+    /// heading for the main scenario row, the journal genre for the job quest
+    /// row ("Mönch-Jobaufträge: Ätherische Harmonie").</summary>
+    public static string ScenarioTreeEntry(string kind, string quest) => $"{kind}: {quest}";
+
     // Mini-map elements without text or tooltip. Measured 2026-10-11 13:41:
     // NUM0 on the upper button raised the map's zoom value (1.25 -> 1.5), on
     // the lower one lowered it (1.5 -> 1.25).
