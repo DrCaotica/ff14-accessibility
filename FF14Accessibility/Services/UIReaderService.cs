@@ -3526,7 +3526,16 @@ public sealed class UIReaderService : IDisposable
         // on a duty-finder setting, so leaving that window ends the help dwell by
         // itself instead of leaving a stale control behind.
         _settingHelpOwner = 0;
-        if (TryReadContentsFinderSettingRow(node, out var dutySetting))
+        if (TryReadChatPanelSelection(node, out var chatMessage))
+        {
+            // Chat message panel under the HUD cursor: Numpad8 / Numpad2 move a
+            // selection message by message without moving the focus node, so
+            // the generic reader (whole visible block) changed only on scrolling
+            // and read the FIRST visible message ([ChatProbe] 2026-10-11 15:06).
+            // The selected message with its position changes on every step.
+            text = chatMessage;
+        }
+        else if (TryReadContentsFinderSettingRow(node, out var dutySetting))
         {
             // Einstellungen der Inhaltssuche: Name UND Zustand ("Keine
             // Beschraenkungen, Schalter, aus"). Vor dem allgemeinen Pfad, der
@@ -4165,6 +4174,110 @@ public sealed class UIReaderService : IDisposable
         }
         return text;
     }
+
+    // WORKAROUND: the message panel's selection has no name in ClientStructs
+    // (LogViewer documents FirstLineVisible @76, LastLineVisible @80,
+    // TotalLineCount @92, nothing at 252), and no game function returning it
+    // is known. Measured with [ChatProbe] 2026-10-11 14:57-15:06 in two tabs:
+    // -1 while the cursor is outside the panel, TotalLineCount on entry (the
+    // newest message), Numpad8 -1, Numpad2 +1, and the game scrolls so it
+    // stays within FirstLineVisible..LastLineVisible. Approved by the user
+    // 2026-10-11 on condition that an implausible value is reported, never
+    // read as some other message. Re-measure after a game patch.
+    private const int ChatPanelSelectionOffset = 252;
+
+    /// <summary>Last implausible selection state logged, so the per-frame
+    /// reader writes one warning per state instead of one per frame.</summary>
+    private string _chatPanelBadState = string.Empty;
+
+    /// <summary>
+    /// Reads the message selected in a chat message panel (ChatLogPanel_N) as
+    /// "{message}, {n} von {total}". The panel's text (LogViewer.ChatText) holds
+    /// the whole messages FirstLineVisible..LastLineVisible in order, so the
+    /// selected one is message (selection - FirstLineVisible) of that text.
+    /// </summary>
+    private unsafe bool TryReadChatPanelSelection(AtkResNode* node, out string text)
+    {
+        text = string.Empty;
+        var addonName = FindAddonNameForNode(node);
+        if (!addonName.StartsWith("ChatLogPanel_", StringComparison.Ordinal)) return false;
+        var panel = (AddonChatLogPanel*)FindAddonForNode(node);
+        if (panel == null) return false;
+
+        var viewer    = &panel->LogViewer;
+        var selection = *(int*)((byte*)viewer + ChatPanelSelectionOffset);
+        var first     = (int)viewer->FirstLineVisible;
+        var last      = (int)viewer->LastLineVisible;
+        var total     = (int)viewer->TotalLineCount;
+
+        // Measured -1 whenever the cursor is outside the panel. Should the focus
+        // reach the panel a frame before the game sets the selection, stay
+        // silent for that frame rather than read the whole block.
+        if (selection == -1) return true;
+
+        var messages = viewer->ChatText == null
+            ? null
+            : SplitChatPanelMessages(viewer->ChatText->NodeText.StringPtr.Value);
+        var index = selection - first;
+        if (selection < first || selection > last || last > total
+            || messages == null || index >= messages.Count)
+        {
+            var state = $"{addonName} auswahl={selection} sichtbar={first}-{last}/{total} meldungen={messages?.Count ?? -1}";
+            if (state != _chatPanelBadState)
+            {
+                _chatPanelBadState = state;
+                _log.Warning($"[ChatPanel] Auswahl unplausibel: {state} (Offset {ChatPanelSelectionOffset} nach Patch neu messen).");
+            }
+            text = AccessibilityStrings.ChatPanelUnreadable;
+            return true;
+        }
+        _chatPanelBadState = string.Empty;
+
+        var message = messages[index];
+        text = AccessibilityStrings.ChatPanelMessage(message, selection, total);
+        return true;
+    }
+
+    /// <summary>
+    /// Splits a chat panel's text into its messages. Measured layout
+    /// ([ChatProbe] 2026-10-11 15:06, payload dump): every message is
+    /// colour-on, text, colour-off, then a text payload "\r" that ends it; the
+    /// game's own word wrap inside a message is a NewLine payload followed by
+    /// two spaces of indentation. Wraps become a single space, so a message is
+    /// read as one sentence. Icons, colours and links carry no text and drop out.
+    /// </summary>
+    private static unsafe List<string> SplitChatPanelMessages(byte* ptr)
+    {
+        var messages = new List<string>();
+        if (ptr == null) return messages;
+        var se      = Dalamud.Memory.MemoryHelper.ReadSeStringNullTerminated((nint)ptr);
+        var current = new StringBuilder();
+        foreach (var payload in se.Payloads)
+        {
+            if (payload is Dalamud.Game.Text.SeStringHandling.Payloads.NewLinePayload)
+            {
+                current.Append(' ');
+                continue;
+            }
+            if (payload is not Dalamud.Game.Text.SeStringHandling.Payloads.TextPayload { Text: { } part }) continue;
+            var pieces = part.Split('\r');
+            for (var p = 0; p < pieces.Length; p++)
+            {
+                current.Append(pieces[p]);
+                if (p == pieces.Length - 1) break;
+                messages.Add(CollapseSpaces(current.ToString()));
+                current.Clear();
+            }
+        }
+        // Text after the last "\r" would be an unterminated message; measured
+        // texts always ended with "\r", so anything left over is kept as one.
+        if (current.ToString().Trim().Length > 0)
+            messages.Add(CollapseSpaces(current.ToString()));
+        return messages;
+    }
+
+    private static string CollapseSpaces(string text) =>
+        System.Text.RegularExpressions.Regex.Replace(text, @"\s+", " ").Trim();
 
     // ScenarioTree (dump 2026-10-11 13:46): heading Text id=11 ("Aktueller
     // Hauptszenario-Auftrag", Addon 5671; 5670 = "Nächster ..."), main scenario

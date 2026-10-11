@@ -1772,6 +1772,21 @@ public static partial class AccessibilityStrings
     public static string ChatLogTab(string name, int index, int count) =>
         IsGerman ? $"Reiter {name}, {index} von {count}" : $"Tab {name}, {index} of {count}";
 
+    /// <summary>The message selected in a chat message panel with its place in
+    /// the tab ("vnavmesh v1.2.3.14 geladen., 15 von 15"). An empty message is an
+    /// empty line in the chat (measured 2026-10-11 15:06) and is said as such.
+    /// Position wanted by the user 2026-10-11.</summary>
+    public static string ChatPanelMessage(string message, int index, int count)
+    {
+        var body = message.Length > 0 ? message : (IsGerman ? "Leere Zeile" : "Empty line");
+        return IsGerman ? $"{body}, {index} von {count}" : $"{body}, {index} of {count}";
+    }
+
+    /// <summary>The chat panel's selection could not be matched to a message
+    /// (stored offset no longer fits, e.g. after a game patch).</summary>
+    public static string ChatPanelUnreadable =>
+        IsGerman ? "Chat-Meldung nicht lesbar" : "Chat message unreadable";
+
     /// <summary>Weather icon of the mini-map; the weather name is the game's
     /// own mouse-over text ("Regnerisch").</summary>
     public static string MiniMapWeather(string weather) =>
