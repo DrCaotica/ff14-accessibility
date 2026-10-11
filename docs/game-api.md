@@ -3204,3 +3204,22 @@ Quellen: Desktop-Dumps FFXIV_UI_Dump_Notizbuch.txt (RecipeNote), FFXIV_UI_Dump_P
   (13). ActionId -> CraftAction-Sheet (Action-Sheet hat diese Ids nicht). Zuordnung Zeile ->
   Aktion ueber Icon (AtkComponentIcon.IconId == CraftAction.Icon), Test 20:38 alle Zeilen richtig.
 - Nach Reiterwechsel zeigt die Liste einen Frame lang noch den alten Reiter.
+## Handwerkernotizbuch: Ansichts-Umschalter (Knopf id=34 / id=35, 2026-10-11)
+
+Gelesen in ffxiv_dx11.exe 2026.09.15.0000.0000 (Capstone, Namen aus ClientStructs ida/data.yml gleicher Version), gemessen per Sonde:
+- Knoten unter „Rezepte": id=34 Button (2 Haelften, nur Bilder, keine Tooltip-Bindung), id=35 Variante mit 3 Haelften, id=33 Suchmodus
+  (Tooltip „Zuletzt gesucht", Addon 1703). Fokus landet auf der Kollision id=8 von 34.
+- Klick: `ButtonClick param 23` an AddonRecipeNote. ReceiveEvent = vtbl 0x14222F5C0 Slot 2 = 0x141232860, Sprungtabellen
+  (Ereignistyp-6 -> base+0x1233448/0x1233410; param-1 -> base+0x1233488). param 23 -> 0x1412365A0:
+  `FireCallbackAndHideOrClose(this, 4, [Int 2, Undef, Undef, Undef])` = `FireCallback(4, values, close: true)`.
+  KEINE Mausposition im Pfad -> welche Haelfte, ist egal. (param 24 -> 0x141236650 [Int 3, Int Feld+0x346c==0], param 20/21 -> 0x141236480(1/0), nicht untersucht.)
+- AgentRecipeNote.ReceiveEvent (vtbl 0x1421C4890 Slot 0 = 0x140C8C040), Werttabelle base+0xC8DBA8, Wert 2 -> 0x140C8CF44:
+  Ansicht = Agent+0x3B4; 0 -> 1 nur wenn Byte+0x3C4 != 0 (sonst nichts), 1 -> 2 wenn Byte+0x3C5 != 0 sonst 0, 2 -> 0. Gesperrt wenn Byte+0x3E6 != 0.
+- Listenaufbau 0x140C90F50: NumberArray RecipeNote (29) `[0x89]` = Ansicht, `[0x8A]` = 1 | 2*(3C4) | 4*(3C5) (freigeschaltete Ansichten),
+  `[4]` = Agent+0x3B0. Listenueberschrift: Ansicht 0 = Addon 1710 „Nach Stufe sortiert", Ansicht 1 = Addon 1711 „Spezialrezepte",
+  Ansicht 2 = Text aus anderer Tabelle (0x44 Eintraege je Klasse) - Name NICHT ermittelt.
+- Messung 2026-10-11: Num0 auf dem Knopf erzeugt KEIN Fensterereignis (Spiel ignoriert die Taste dort). Gesetzter Mauszeiger (SetCursorPos)
+  kam im Spiel-Cursor an (UIInputData.CursorInputs), ergab aber kein MouseOver/Click am Knopf - Ursache offen.
+  User-Konto: Ansicht 0, Maske 1 -> Callback [2] kommt am Agent an, aendert nichts (wie Mausklick).
+- Mod (UIReaderService): Ansage aus NumberArray + Addon-Texten; Num0 (nicht geschluckt) feuert denselben Callback, Ansicht wird zurueckgelesen.
+  Umschalten selbst noch NICHT im Spiel getestet (braucht freigeschaltete Spezialrezepte).
