@@ -1742,6 +1742,15 @@ public static partial class AccessibilityStrings
             ? $"{page}. Erneut bestätigen für die Einstellungen."
             : $"{page}. Confirm again to enter the settings.";
 
+    /// <summary>Footer button "Voreinstellung" of the system configuration.
+    /// The game only resets after a yes/no question ("Alle Einstellungen auf
+    /// Voreinstellung zurücksetzen?"), and not just for the open tab
+    /// (disassembly, docs/game-api.md). The button itself shows only its name.</summary>
+    public static string ConfigResetButton(string label) =>
+        IsGerman
+            ? $"{label}. Setzt nach einer Rückfrage alle Einstellungen auf die Vorgabe des Spiels zurück."
+            : $"{label}. Resets all settings to the game's defaults after a confirmation.";
+
     public static string TabPressedNoPageChange => IsGerman ? "Reiter gedrückt, aber kein Seitenwechsel erkannt." : "Tab pressed, but no page change detected.";
     public static string TabNotResponding => IsGerman ? "Reiter reagiert nicht." : "Tab not responding.";
 

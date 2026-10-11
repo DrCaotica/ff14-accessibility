@@ -3939,6 +3939,7 @@ public sealed class UIReaderService : IDisposable
             // Typ und Wert in EINER Ansage liefert.
             if (FindAddonNameForNode(node) == "ConfigSystem"
                 && IsGlobalConfigControl("ConfigSystem", node)) return;
+            text = DescribeConfigResetButton(node, text);
             // Charaktererstellung, Schritt Aussehen: der EINZIGE Eingriff dieses
             // Features in den Fokus-Leser. Gibt den Text unveraendert zurueck, solange
             // der Fokus nicht in _CharaMakeFeature oder einem CMF*-Waehler steht - dort
@@ -6157,6 +6158,28 @@ public sealed class UIReaderService : IDisposable
         }
         found.Sort((a, b) => a.X.CompareTo(b.X));
         return found;
+    }
+
+    // Footer button "Voreinstellung" of ConfigSystem (dump 2026-10-10: Comp(1010)
+    // id=592, the focus sits on its collision id=4). Its ButtonClick sends
+    // callback [Int 15]; the agent answers with a yes/no question and only on
+    // "yes" calls ConfigModule.ResetOptionsByCategoryMask - with no tab argument
+    // (disassembly 2026-10-11, docs/game-api.md). A sighted player reads the
+    // question after clicking; the label alone does not tell what it resets.
+    private const uint ConfigResetButtonId = 592;
+
+    /// <summary>
+    /// Adds what the "Voreinstellung" button of the system configuration does to
+    /// its label. Any other node is returned unchanged.
+    /// </summary>
+    private unsafe string DescribeConfigResetButton(AtkResNode* node, string text)
+    {
+        if (FindAddonNameForNode(node) != "ConfigSystem") return text;
+        var ptr = _gameGui.GetAddonByName("ConfigSystem");
+        if (ptr.IsNull) return text;
+        var owner = FindTopLevelOwner((AtkUnitBase*)(nint)ptr, node, out _);
+        if (owner == null || owner->NodeId != ConfigResetButtonId) return text;
+        return AccessibilityStrings.ConfigResetButton(text);
     }
 
     /// <summary>
