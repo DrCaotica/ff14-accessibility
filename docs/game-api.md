@@ -3157,6 +3157,28 @@ Quelle: Keybind-Dump, Log 13:11-13:54, UI-Dumps, Disassembly ffxiv_dx11.exe 2026
   „Chakra-Balken erweitert!“); Num0 öffnete `Guide` („JOB-BALKEN“), danach verschwand er.
 - Innerhalb eines Bereichs bewegen Num8/Num2 den Fokus, Num0 löst aus.
 - `ChatLog`: Fokus auf dem Eingabefeld (TextInput id=5) bzw. id=2, kein Text.
+  Tasten im Chat-Bereich ([ChatProbe] 2026-10-11 14:06-14:43, Dumps ChatLog/ContextMenu):
+  - Num4/Num6 laufen rundum durch die untere Leiste: Eingabefeld id=5 → Kanal-Auswahl
+    (`ChannelSelectDropDown`, id=3) → Knopf 13 → Knopf 10 (`SettingsComponentNode`) →
+    Knopf 9 (`AddTabComponentNode`). Knopf 12 (`NoviceNetworkComponentNode`) liegt unter 13, nur für Neulinge sichtbar.
+  - Tooltips bindet das Setup (0x1412D5970) per AttachTooltip aus dem Addon-Sheet:
+    9 = 1095 „Neuer Reiter“, 10 = 1096 „Chatlog-Einstellungen“, 12 = 1097 „Teilnehmerliste des
+    Neulings-Chats anzeigen“, 13 = 13736 „Chatlog verbergen“, Kanal-Auswahl = 13737 „Chat-Modus wechseln“.
+    Nach einem Plugin-Reload fehlen sie im TooltipService (Fenster wird nur beim Login gebaut).
+  - Num0 auf Knopf 9: ButtonClick param 1 → `InputString` „Reiter-Name“ (Vorgabe „Reiter 4“).
+  - Num7/Num9: `TabIndex` −1/+1 rundum über `TabCount` (3). Entgegen dem Kommentar in
+    ChatTabControl.cs gibt es also eine Spieltaste für die Chat-Reiter (im HUD-Fokus).
+  - Num8: Fokus in `ChatLogPanel_<TabIndex>` (je Reiter ein eigenes Panel), Text id=3 =
+    mehrere Zeilen am Stück. Num8/Num2 darin: nur InputReceived param 4096/1000, kein
+    Fokuswechsel (vermutlich Scrollen, UNBELEGT). Num2 unten bzw. Komma → zurück auf id=5.
+  - Num7/Num9 IM Panel: Reiter wechselt UND der Cursor springt aufs Eingabefeld, im selben
+    Frame (`Framework.FrameCounter` gleich, 3 von 3 Fällen).
+  - Num* öffnet `ContextMenu` mit genau einem Eintrag „Chatlog verbergen“ (ListLen=1).
+  - Num+ = Hauptmenü (global). Komma: zurück aufs Eingabefeld, zweites Komma verlässt den Bereich.
+  - `FocusedUnitsList` behält `ChatLog`, während der Cursor in anderen Bereichen steht
+    („[ChatLog,ScenarioTree]“); der LETZTE Eintrag ist das Fenster mit dem Cursor.
+  - Controller-Hinweise Addon 101028/101033-101035 (Untermenü, Chatlog auswählen, Reiter
+    umschalten, Zurück zum Chat, Chatlog vergrößern) – Tasten nur als Icon2-Makro, nicht auf dem Bildschirm gefunden.
 - `ScenarioTree`: Überschrift Text id=11 („Aktueller Hauptszenario-Auftrag“, Addon 5671;
   5670 „Nächster …“), Hauptszenario-Knopf id=13, Job-Quest-Knopf id=7 (id=8 zweiter, leer).
   Num2 von 13 nach 7. Num0 auf beiden öffnet `AreaMap`.
@@ -3172,3 +3194,6 @@ Quelle: Keybind-Dump, Log 13:11-13:54, UI-Dumps, Disassembly ffxiv_dx11.exe 2026
     `StringArrayType.NaviMap[2]` = Wetter („Regnerisch“, zeigergleich belegt). NaviMap[0] = Kartendatei.
 - Mod (feature/hud-focus-regions): Bereichsname beim Betreten (Job-Hinweis, Szenario-Leitfaden,
   Chat, Auftragsliste, Mini-Map), Mini-Map-Elemente und Leitfaden-Einträge benannt.
+  Chat: Leiste benannt („Kanal-Eingabe, Sagen“, „Chat-Modus wechseln, Auswahlliste, Sagen“,
+  Knöpfe per Addon-Sheet), Reiterwechsel „Reiter Kampf, 2 von 3“ (nur gewohntes Chatsystem;
+  das neue sagt ihn über FollowChatTab). Panels zählen zum Bereich Chat.

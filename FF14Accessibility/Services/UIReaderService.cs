@@ -10767,7 +10767,7 @@ public sealed class UIReaderService : IDisposable
         }
         var name = TolkService.Sanitize(chat->TabNames[index].ToString()).Trim();
         var frame = GameFrame();
-        _log.Info($"[HudFocus] Chat-Reiter {index + 1}/{chat->TabCount} '{name}' frame={frame}");
+        _log.Info($"[HudFocus] Chat-Reiter {index + 1}/{chat->TabCount} '{name}'");
         if (name.Length == 0) return;
         _hudChatTabSpeech = AccessibilityStrings.ChatLogTab(name, index + 1, chat->TabCount);
         _hudChatTabFrame  = frame;
@@ -10783,14 +10783,13 @@ public sealed class UIReaderService : IDisposable
     /// cursor back to the input field ([ChatProbe] 14:38:32: FocusStop on the
     /// panel, then the focus line 7 ms after the tab line). The focus speech
     /// interrupted the tab name, so a focus change in the SAME game frame as a
-    /// tab change carries the tab name in front.
+    /// tab change carries the tab name in front. Same frame measured for all
+    /// three tabs (log 2026-10-11 14:42:16, 14:42:50, 14:43:12).
     /// </summary>
     private string PrefixSameFrameChatTab(string focusAddon, string text)
     {
         if (HudRegionKey(focusAddon) != "ChatLog" || _hudChatTabSpeech.Length == 0) return text;
-        var frame = GameFrame();
-        _log.Info($"[HudFocus] Chat-Fokus frame={frame}, Reiter-Ansage frame={_hudChatTabFrame}");
-        if (frame != _hudChatTabFrame) return text;
+        if (GameFrame() != _hudChatTabFrame) return text;
         return AccessibilityStrings.HudRegionWith(_hudChatTabSpeech, text);
     }
 
