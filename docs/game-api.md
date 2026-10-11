@@ -3168,9 +3168,22 @@ Quelle: Keybind-Dump, Log 13:11-13:54, UI-Dumps, Disassembly ffxiv_dx11.exe 2026
   - Num0 auf Knopf 9: ButtonClick param 1 → `InputString` „Reiter-Name“ (Vorgabe „Reiter 4“).
   - Num7/Num9: `TabIndex` −1/+1 rundum über `TabCount` (3). Entgegen dem Kommentar in
     ChatTabControl.cs gibt es also eine Spieltaste für die Chat-Reiter (im HUD-Fokus).
-  - Num8: Fokus in `ChatLogPanel_<TabIndex>` (je Reiter ein eigenes Panel), Text id=3 =
-    mehrere Zeilen am Stück. Num8/Num2 darin: nur InputReceived param 4096/1000, kein
-    Fokuswechsel (vermutlich Scrollen, UNBELEGT). Num2 unten bzw. Komma → zurück auf id=5.
+  - Num8: Fokus in `ChatLogPanel_<TabIndex>` (je Reiter ein eigenes Panel, Panel n =
+    `RaptureLogModule.ChatTabs[n]`, für n=1 belegt), Fokusknoten id=3 (Res-Knoten, Typ 1).
+    Num8/Num2 darin bewegen eine AUSWAHL von Meldung zu Meldung, der Fokusknoten bleibt
+    ([ChatProbe] 2026-10-11 14:57-15:06). Num2 unter der neuesten Meldung bzw. Komma → zurück auf id=5.
+  - `AddonChatLogPanel.LogViewer` (@640): Auswahl = int bei LogViewer+252 (in ClientStructs
+    UNBENANNT). −1 außerhalb des Panels, beim Betreten = `TotalLineCount` (neueste Meldung),
+    Num8 −1, Num2 +1. Zählt MELDUNGEN, nicht Bildschirmzeilen, 1-basiert im Bereich
+    `FirstLineVisible`..`LastLineVisible` (z. B. 9..15 von 15 = 7 Meldungen in 13 Zeilen).
+    Am oberen Rand blättert das Spiel mit (Auswahl 8 → sichtbar 8-14). `IsScrolledBottom`
+    kippt erst, wenn gescrollt wird. +124/+148/+256/+260 ändern sich mit, Bedeutung UNBELEGT.
+  - `LogViewer.ChatText` == `ChatTabs[n].VisibleLogLines`: genau die ganzen Meldungen
+    First..Last. Aufbau je Meldung: Farbe an `02 13 06 FE FF rr gg bb 03`, Text, je Umbruch
+    NewLine `02 10 01 03` + zwei Leerzeichen Einzug, Farbe aus `02 13 02 EC 03`, Text „\r“.
+    Meldungsgrenze = „\r“, Umbruch innerhalb = NewLine-Payload. Leere Meldungen kommen vor
+    (nur Farbe an/aus + „\r“). Ausgewählte Meldung = Nr. (Auswahl − FirstLineVisible) im ChatText.
+    Mehrteilige Ankündigungen (Wartung) sind mehrere eigene Meldungen.
   - Num7/Num9 IM Panel: Reiter wechselt UND der Cursor springt aufs Eingabefeld, im selben
     Frame (`Framework.FrameCounter` gleich, 3 von 3 Fällen).
   - Num* öffnet `ContextMenu` mit genau einem Eintrag „Chatlog verbergen“ (ListLen=1).
@@ -3197,3 +3210,5 @@ Quelle: Keybind-Dump, Log 13:11-13:54, UI-Dumps, Disassembly ffxiv_dx11.exe 2026
   Chat: Leiste benannt („Kanal-Eingabe, Sagen“, „Chat-Modus wechseln, Auswahlliste, Sagen“,
   Knöpfe per Addon-Sheet), Reiterwechsel „Reiter Kampf, 2 von 3“ (nur gewohntes Chatsystem;
   das neue sagt ihn über FollowChatTab). Panels zählen zum Bereich Chat.
+  Nachrichtenfeld: ausgewählte Meldung „<Meldung>, n von m“ (TryReadChatPanelSelection),
+  leere Meldung „Leere Zeile“, unplausible Auswahl → Log-Warnung [ChatPanel] + „Chat-Meldung nicht lesbar“.
