@@ -1455,8 +1455,28 @@ hier um den Faktor neun.
 - Controls: CheckBox(3)/RadioButton(4)/Slider(6)/DropDownList(10),
   Label = Kind-Text id=2 der Komponente; Abschnitts-Überschriften sind
   eigenständige Top-Level-Texte (id 575 „Farbwahrnehmung" usw.).
-- Fußnoten-Buttons: „Voreinstellung"/„Schließen"/„Anwenden" (Comp 1001?
-  via Kind id=2-Text).
+- Fußnoten-Buttons (Dump 2026-10-10): Comp(1010) id=592 „Voreinstellung",
+  id=591 „Schließen", id=590 „Anwenden"; Fokus liegt auf der Kollision id=4
+  des Knopfs. Texte Addon 4003/4005/4004.
+- Was die Fußnoten-Knöpfe auslösen (ffxiv_dx11.exe 2026.09.15.0000.0000, Capstone,
+  Namen aus ClientStructs ida/data.yml gleicher Version; NICHT im Spiel gemessen):
+  - AddonConfigSystem.OnSetup (vtbl 0x142209BB8 Slot 49 = 0x1411457F0) registriert
+    ButtonClick: 592 → Param 3, 590 → Param 2, 591 → Param 1, 63 („Größe auf alle
+    UI-Elemente anwenden") → Param 4.
+  - ReceiveEvent (Slot 2 = 0x14114D620), ButtonClick-Tabelle base+0x114E6FC:
+    Param 3 → FireCallback [Int 15], Param 2 → [Int 0], Param 1 → [Int 1], Param 4 → [Int 0x22].
+  - AgentConfigSystem.ReceiveEvent (0x1404FA6C0) reicht Werte unter 0x10 an
+    0x1404F3D00 (gemeinsamer Teil der Konfig-Agenten) weiter. Wert 15 → OpenYesNo mit
+    Addon 4190 „Alle Einstellungen auf Voreinstellung zurücksetzen?" (Rückmeldung Art 3).
+    Erst bei „Ja" (Antwort 0) → Agent-vtbl Slot 21 (0x1404F80C0):
+    `ConfigModule.ResetOptionsByCategoryMask(Maske 0x900003F bzw. 0x16BDFFC0, je nach Byte
+    Agent+0x60)`, danach Agent+0x4D = 1 (dasselbe Flag, bei dem „Schließen" mit Addon 7530
+    „Änderungen verwerfen und Fenster schließen?" nachfragt). Kein Reiter-Argument →
+    wirkt nicht nur auf den offenen Reiter. Ob die Werte erst mit „Anwenden" gelten:
+    UNBELEGT. Bedeutung von Agent+0x60 und der Masken-Bits: UNBEKANNT.
+  - Wert 14 → 0x1404F3990 mit Addon 4191 „Die Einstellungen in diesem Untermenü
+    zurücksetzen?" (Kontextmenü-Eintrag 4182 „Dieses Untermenü zurücksetzen"),
+    Auslöser nicht verfolgt.
 - Lautstärke-Regler (Reiter „Sound", V5.58): Zeilen-Muster Top-Level-Text-Label
   → Stumm-CheckBox Comp(1027) → Slider Comp(1023); Label = nächster vorangehender
   Top-Level-Text (NearestPrecedingLabel). Slider laufen 0..100 → als Prozent
