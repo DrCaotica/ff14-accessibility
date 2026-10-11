@@ -3814,8 +3814,9 @@ public sealed class UIReaderService : IDisposable
         if (hudRegion != null)
         {
             text = DescribeHudRegionFocus(focusAddon, node, text);
-            if (focusAddon != _lastFocusAddonName)
+            if (HudRegionKey(focusAddon) != HudRegionKey(_lastFocusAddonName))
                 text = AccessibilityStrings.HudRegionWith(hudRegion, text);
+            text = PrefixSameFrameChatTab(focusAddon, text);
         }
         _lastFocusAddonName = focusAddon;
         // Real focus change: the new item counts as unannounced until the speak
@@ -4007,6 +4008,15 @@ public sealed class UIReaderService : IDisposable
         "_NaviMap"     => AccessibilityStrings.HudRegionMiniMap,
         _              => null,
     };
+
+    /// <summary>
+    /// The area an addon belongs to for the entry announcement. The chat's
+    /// message panels (one per tab, ChatLogPanel_0..2 logged 14:38) are part of
+    /// the chat area: Numpad8 / Numpad2 move between them and the bar, and
+    /// that is a move inside the area, not an entry.
+    /// </summary>
+    private static string HudRegionKey(string addonName) =>
+        addonName.StartsWith("ChatLogPanel_", StringComparison.Ordinal) ? "ChatLog" : addonName;
 
     // JobHudNotice (dump 2026-10-11 13:25): Button id=5 carries the job name
     // ("Mönch", text id=2), the notice itself is a separate component id=4
@@ -10756,9 +10766,39 @@ public sealed class UIReaderService : IDisposable
             return;
         }
         var name = TolkService.Sanitize(chat->TabNames[index].ToString()).Trim();
-        _log.Info($"[HudFocus] Chat-Reiter {index + 1}/{chat->TabCount} '{name}'");
+        var frame = GameFrame();
+        _log.Info($"[HudFocus] Chat-Reiter {index + 1}/{chat->TabCount} '{name}' frame={frame}");
         if (name.Length == 0) return;
-        _tolk.SpeakInterrupt(AccessibilityStrings.ChatLogTab(name, index + 1, chat->TabCount));
+        _hudChatTabSpeech = AccessibilityStrings.ChatLogTab(name, index + 1, chat->TabCount);
+        _hudChatTabFrame  = frame;
+        _tolk.SpeakInterrupt(_hudChatTabSpeech);
+    }
+
+    /// <summary>Last spoken tab announcement and the game frame it was made in.</summary>
+    private string _hudChatTabSpeech = string.Empty;
+    private uint   _hudChatTabFrame  = uint.MaxValue;
+
+    /// <summary>
+    /// Switching the tab from inside the message panel also moves the game's
+    /// cursor back to the input field ([ChatProbe] 14:38:32: FocusStop on the
+    /// panel, then the focus line 7 ms after the tab line). The focus speech
+    /// interrupted the tab name, so a focus change in the SAME game frame as a
+    /// tab change carries the tab name in front.
+    /// </summary>
+    private string PrefixSameFrameChatTab(string focusAddon, string text)
+    {
+        if (HudRegionKey(focusAddon) != "ChatLog" || _hudChatTabSpeech.Length == 0) return text;
+        var frame = GameFrame();
+        _log.Info($"[HudFocus] Chat-Fokus frame={frame}, Reiter-Ansage frame={_hudChatTabFrame}");
+        if (frame != _hudChatTabFrame) return text;
+        return AccessibilityStrings.HudRegionWith(_hudChatTabSpeech, text);
+    }
+
+    /// <summary>The game's frame counter (Framework.FrameCounter).</summary>
+    private static unsafe uint GameFrame()
+    {
+        var fw = FFXIVClientStructs.FFXIV.Client.System.Framework.Framework.Instance();
+        return fw == null ? 0 : fw->FrameCounter;
     }
 
     /// <summary>
