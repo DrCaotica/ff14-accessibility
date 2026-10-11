@@ -1743,6 +1743,17 @@ public static partial class AccessibilityStrings
     public static string HudRegionDutyList  => IsGerman ? "Auftragsliste" : "Duty list";
     public static string HudRegionMiniMap   => IsGerman ? "Mini-Map" : "Mini-map";
 
+    // Mini-map elements without text or tooltip. Measured 2026-10-11 13:41:
+    // NUM0 on the upper button raised the map's zoom value (1.25 -> 1.5), on
+    // the lower one lowered it (1.5 -> 1.25).
+    public static string MiniMapZoomIn  => IsGerman ? "Hineinzoomen, Knopf" : "Zoom in, button";
+    public static string MiniMapZoomOut => IsGerman ? "Herauszoomen, Knopf" : "Zoom out, button";
+
+    /// <summary>Weather icon of the mini-map; the weather name is the game's
+    /// own mouse-over text ("Regnerisch").</summary>
+    public static string MiniMapWeather(string weather) =>
+        IsGerman ? $"Wetter: {weather}" : $"Weather: {weather}";
+
     /// <summary>"{region}, {text}" when the cursor enters a HUD area; the
     /// region alone when the focused element has no text of its own.</summary>
     public static string HudRegionWith(string region, string text) =>

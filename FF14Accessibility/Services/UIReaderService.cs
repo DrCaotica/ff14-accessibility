@@ -4021,6 +4021,16 @@ public sealed class UIReaderService : IDisposable
     // "Norden/Blickrichtung nach oben ausrichten").
     private const uint NaviMapRotationCheckBoxId = 4;
 
+    // The other three focus stops of _NaviMap (OnSetup 0x141580FA0, measured
+    // with [HudProbe] 2026-10-11 13:41): Button id=2 (upper, ButtonClick param
+    // 4) and id=3 (lower, param 3) raise / lower the map zoom - NUM0 moved the
+    // zoom value 1.25 -> 1.5 on id=2 and 1.5 -> 1.25 on id=3. Neither has text
+    // or a tooltip. Comp id=14 is the weather icon: its mouse-over text is
+    // string [2] of StringArrayType.NaviMap (same pointer, "Regnerisch").
+    private const uint NaviMapZoomInButtonId  = 2;
+    private const uint NaviMapZoomOutButtonId = 3;
+    private const uint NaviMapWeatherIconId   = 14;
+
     /// <summary>
     /// Fills in what a sighted player sees on a focused HUD element that has no
     /// text of its own. Returns <paramref name="text"/> unchanged otherwise.
@@ -4044,22 +4054,44 @@ public sealed class UIReaderService : IDisposable
         if (addonName == "_NaviMap")
         {
             var owner = FindTopLevelOwner(addon, node, out _);
-            if (owner == null || owner->NodeId != NaviMapRotationCheckBoxId || (int)owner->Type < 1000) return text;
+            if (owner == null || (int)owner->Type < 1000) return text;
             var comp = ((AtkComponentNode*)owner)->Component;
-            if (comp == null || comp->GetComponentType() != ComponentType.CheckBox) return text;
-            var stage = AtkStage.Instance();
-            var strings = stage == null ? null : stage->GetStringArrayData(StringArrayType.AreaMap);
-            if (strings == null || strings->AtkArrayData.Size < 1 || strings->StringArray[0].Value == null)
+            if (comp == null) return text;
+            switch (owner->NodeId)
             {
-                _log.Warning("[HudFocus] Mini-Map: Tooltip-Text (AreaMap[0]) fehlt.");
-                return text;
+                case NaviMapZoomInButtonId when comp->GetComponentType() == ComponentType.Button:
+                    return AccessibilityStrings.MiniMapZoomIn;
+                case NaviMapZoomOutButtonId when comp->GetComponentType() == ComponentType.Button:
+                    return AccessibilityStrings.MiniMapZoomOut;
+                case NaviMapWeatherIconId:
+                {
+                    var weather = ReadHudString(StringArrayType.NaviMap, 2);
+                    return weather.Length == 0 ? text : AccessibilityStrings.MiniMapWeather(weather);
+                }
+                case NaviMapRotationCheckBoxId when comp->GetComponentType() == ComponentType.CheckBox:
+                {
+                    var label = ReadHudString(StringArrayType.AreaMap, 0);
+                    return label.Length == 0 ? text
+                        : AccessibilityStrings.SwitchWithState(label, ((AtkComponentButton*)comp)->IsChecked);
+                }
             }
-            var label = Dalamud.Memory.MemoryHelper.ReadSeStringNullTerminated((nint)strings->StringArray[0].Value).TextValue.Trim();
-            if (label.Length == 0) return text;
-            return AccessibilityStrings.SwitchWithState(label, ((AtkComponentButton*)comp)->IsChecked);
         }
 
         return text;
+    }
+
+    /// <summary>One string of a game string array, empty (and logged) when the
+    /// array or the slot is missing.</summary>
+    private unsafe string ReadHudString(StringArrayType type, int index)
+    {
+        var stage = AtkStage.Instance();
+        var strings = stage == null ? null : stage->GetStringArrayData(type);
+        if (strings == null || strings->AtkArrayData.Size <= index || strings->StringArray[index].Value == null)
+        {
+            _log.Warning($"[HudFocus] Text {type}[{index}] fehlt.");
+            return string.Empty;
+        }
+        return Dalamud.Memory.MemoryHelper.ReadSeStringNullTerminated((nint)strings->StringArray[index].Value).TextValue.Trim();
     }
 
     // -- Charaktererstellung: Auswahl folgt dem Fokus (V4.93) ----------------
