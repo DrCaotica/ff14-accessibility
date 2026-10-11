@@ -2418,6 +2418,9 @@ public sealed class Plugin : IDalamudPlugin
         if (IsJustPressed(_config.KeySkillMenu))     _hotbar.ToggleSkillMenu(IsControllerMode());
         // ContextMenu: nur Auswahl setzen, Numpad0 NICHT schlucken (Spiel-OK).
         PrepareContextMenuForGameOk();
+        // Notizbuch-Ansichtsumschalter: Num0 erreicht ihn im Spiel nicht, der Mod
+        // schickt zusaetzlich die Klick-Meldung (Taste wird NICHT geschluckt).
+        if (IsJustPressed("Numpad0")) _uiReader.ToggleRecipeViewIfFocused();
         // [Job-Anzeige] Zustand auf Nachfrage, ohne auf eine Flanke zu warten.
         if (IsJustPressed(_config.KeyJobGauge))      _jobGauge.AnnounceCurrent();
         HandleFaceWaypointKey();
@@ -2576,6 +2579,7 @@ public sealed class Plugin : IDalamudPlugin
         // Ergebnis der HQ-Uebernahme (Einfg) nachlesen: gesprochen wird erst,
         // wenn das Fenster die Aenderung zeigt - oder wenn sie ausbleibt.
         _uiReader.HqFillVerifyTick();
+        _uiReader.RecipeViewVerifyTick();
         // Sammel-Journal: Ergebnis des Filter-Ausschaltens nachlesen und die
         // Spielzeile "There are no items to display" ansagen, sobald sie
         // erscheint (vorher war eine leere Liste einfach Stille).

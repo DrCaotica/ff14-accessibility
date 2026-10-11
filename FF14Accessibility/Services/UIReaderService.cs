@@ -3656,6 +3656,12 @@ public sealed class UIReaderService : IDisposable
             // window carries its own label node for exactly this field.
             text = recipeSearch;
         }
+        else if (TryReadRecipeViewButton(node, out var recipeView))
+        {
+            // Crafting log view toggle (id 34/35): images only, no tooltip -
+            // the cursor stood on it in silence (log 2026-10-10 12:34:52).
+            text = recipeView;
+        }
         else if (TryReadRecipeNoteDetailFocus(node, out var recipeDetail))
         {
             // Crafting log detail pane: crystal slots and the NQ/HQ columns of
@@ -13449,6 +13455,188 @@ public sealed class UIReaderService : IDisposable
             node = node->ParentNode;
         }
         return false;
+    }
+
+    // -- Ansichts-Umschalter (Knopf id=34 / id=35) -------------------------
+    //
+    // Unter "Rezepte" steht ein Knopf aus zwei (id=34) bzw. drei (id=35) Haelften,
+    // nur Bilder, ohne Tooltip-Bindung - der Fokus stand stumm darauf. Gelesen in
+    // ffxiv_dx11.exe 2026.09.15 (docs/game-api.md, "Handwerkernotizbuch:
+    // Ansichts-Umschalter"):
+    //   - Ein Klick kommt als ButtonClick param 23 an; AddonRecipeNote leitet ihn
+    //     an 0x1412365A0 weiter, das FireCallback(4, [Int 2, -, -, -], true)
+    //     ruft. Die Mausposition kommt im Pfad nicht vor: welche Haelfte, ist egal.
+    //   - AgentRecipeNote schaltet bei Wert 2 reihum 0 -> 1 -> 2 -> 0, aber nur
+    //     in freigeschaltete Ansichten; sonst tut es nichts.
+    //   - Der Listenaufbau (0x140C90F50) legt Ansicht und Freischaltung in die
+    //     NumberArray RecipeNote: [0x89] = Ansicht, [0x8A] = Bitmaske 1|2|4.
+    //     Ueberschrift der Liste: Ansicht 0 = Addon 1710, Ansicht 1 = Addon 1711.
+    //     Der Name von Ansicht 2 kommt aus einer anderen Tabelle (nicht ermittelt).
+    //   - Num0 auf dem Knopf erreicht das Fenster gar nicht (Messung 2026-10-11
+    //     11:10, kein Ereignis) - der Mod schluckt die Taste also nicht, er
+    //     schickt nur zusaetzlich dieselbe Meldung wie ein Mausklick.
+
+    private static readonly uint[] RecipeViewButtonIds = [34, 35];
+    private const int RecipeViewModeIndex = 0x89;
+    private const int RecipeViewMaskIndex = 0x8A;
+    private const int RecipeViewModeCount = 3;
+    private static readonly uint[] RecipeViewAddonRows = [1710, 1711];
+    private const long RecipeViewVerifyMs = 1000;
+
+    private bool _recipeViewPending;
+    private int  _recipeViewBefore;
+    private long _recipeViewDeadline;
+
+    /// <summary>
+    /// The crafting log's view state as the window itself shows it: the active
+    /// view (0..2) and the mask of views the game lets the player switch to.
+    /// False when the window or its number array is not there.
+    /// </summary>
+    private static unsafe bool TryReadRecipeView(out int mode, out int mask)
+    {
+        mode = 0;
+        mask = 0;
+        var stage = AtkStage.Instance();
+        if (stage == null) return false;
+        var numbers = stage->GetNumberArrayData()[(int)NumberArrayType.RecipeNote];
+        if (numbers == null || numbers->AtkArrayData.Size <= RecipeViewMaskIndex) return false;
+        mode = numbers->IntArray[RecipeViewModeIndex];
+        mask = numbers->IntArray[RecipeViewMaskIndex];
+        return mode is >= 0 and < RecipeViewModeCount;
+    }
+
+    /// <summary>The game's own name for a view: the heading it puts over the
+    /// recipe list. View 2 has no Addon row (see the block comment above).</summary>
+    private string RecipeViewName(int mode)
+    {
+        if (mode < RecipeViewAddonRows.Length)
+        {
+            var text = _data.GetExcelSheet<Lumina.Excel.Sheets.Addon>()
+                .GetRowOrDefault(RecipeViewAddonRows[mode])?.Text.ExtractText().Trim();
+            if (!string.IsNullOrEmpty(text)) return text;
+            _log.Warning($"[RecipeView] Addon-Zeile {RecipeViewAddonRows[mode]} leer oder fehlt.");
+        }
+        return AccessibilityStrings.RecipeViewNumber(mode + 1);
+    }
+
+    /// <summary>"Rezeptansicht: name, Umschalter, n von m" - or, with only one
+    /// view unlocked, the note that there is nothing to switch to.</summary>
+    private string DescribeRecipeView(int mode, int mask)
+    {
+        var enabled = new List<int>();
+        for (var m = 0; m < RecipeViewModeCount; m++)
+            if ((mask & (1 << m)) != 0) enabled.Add(m);
+
+        var name = RecipeViewName(mode);
+        var position = enabled.IndexOf(mode) + 1;
+        return enabled.Count <= 1 || position == 0
+            ? AccessibilityStrings.RecipeViewSingle(name)
+            : AccessibilityStrings.RecipeViewPosition(name, position, enabled.Count);
+    }
+
+    /// <summary>The view button (id 34 or 35) of a visible crafting log when the
+    /// focus sits on it or inside it (the focus lands on its Collision child).</summary>
+    private unsafe AtkUnitBase* FindFocusedRecipeViewButton(AtkResNode* focused)
+    {
+        if (focused == null) return null;
+        var ptr = _gameGui.GetAddonByName("RecipeNote");
+        if (ptr.IsNull) return null;
+        var addon = (AtkUnitBase*)(nint)ptr;
+        if (!addon->IsVisible || !IsNodeInAddon(focused, addon)) return null;
+
+        foreach (var id in RecipeViewButtonIds)
+        {
+            var button = addon->GetNodeById(id);
+            if (button == null || !button->IsVisible()) continue;
+            for (var node = focused; node != null; node = node->ParentNode)
+                if (node == button) return addon;
+        }
+        return null;
+    }
+
+    /// <summary>Focus reader for the view button.</summary>
+    private unsafe bool TryReadRecipeViewButton(AtkResNode* focused, out string text)
+    {
+        text = string.Empty;
+        if (FindFocusedRecipeViewButton(focused) == null) return false;
+        if (!TryReadRecipeView(out var mode, out var mask))
+        {
+            _log.Warning("[RecipeView] Ansicht nicht lesbar (NumberArray RecipeNote fehlt oder Wert ausserhalb).");
+            text = AccessibilityStrings.RecipeViewUnreadable;
+            return true;
+        }
+        text = DescribeRecipeView(mode, mask);
+        return true;
+    }
+
+    /// <summary>
+    /// Numpad0 on the view button: sends exactly what a mouse click sends and
+    /// arms <see cref="RecipeViewVerifyTick"/>, which announces the view the
+    /// window shows afterwards. Never swallows the key; does nothing unless the
+    /// focus is on the button.
+    /// </summary>
+    public unsafe void ToggleRecipeViewIfFocused()
+    {
+        var stage = AtkStage.Instance();
+        if (stage == null || stage->AtkInputManager == null) return;
+        var addon = FindFocusedRecipeViewButton(stage->AtkInputManager->FocusedNode);
+        if (addon == null) return;
+
+        if (!TryReadRecipeView(out var mode, out var mask))
+        {
+            _log.Warning("[RecipeView] Umschalten abgebrochen: Ansicht nicht lesbar.");
+            _tolk.SpeakInterrupt(AccessibilityStrings.RecipeViewUnreadable);
+            return;
+        }
+
+        // Only one view unlocked: the game ignores the click (agent case 2), so
+        // say so instead of sending a request that cannot change anything.
+        if ((mask & ~1) == 0)
+        {
+            _tolk.SpeakInterrupt(AccessibilityStrings.RecipeViewSingle(RecipeViewName(mode)));
+            return;
+        }
+
+        var values = stackalloc AtkValue[4];
+        for (var i = 0; i < 4; i++) values[i] = default;
+        values[0].SetInt(2);
+        addon->FireCallback(4, values, true);
+        _log.Info($"[RecipeView] Umschalten angefragt (Ansicht {mode}, Maske {mask}).");
+
+        _recipeViewPending  = true;
+        _recipeViewBefore   = mode;
+        _recipeViewDeadline = Environment.TickCount64 + RecipeViewVerifyMs;
+    }
+
+    /// <summary>
+    /// Announces the view after a toggle - read back from the window, never
+    /// assumed. Silent failure would be indistinguishable from success for a
+    /// blind player, so an unchanged view after the wait is reported too.
+    /// Called every frame; a no-op unless a toggle is waiting for its answer.
+    /// </summary>
+    public void RecipeViewVerifyTick()
+    {
+        if (!_recipeViewPending) return;
+
+        if (!TryReadRecipeView(out var mode, out var mask))
+        {
+            _recipeViewPending = false;
+            _log.Warning("[RecipeView] Nachpruefung abgebrochen: Fenster oder Ansicht nicht mehr lesbar.");
+            return;
+        }
+
+        if (mode != _recipeViewBefore)
+        {
+            _recipeViewPending = false;
+            _log.Info($"[RecipeView] Ansicht gewechselt: {_recipeViewBefore} -> {mode}.");
+            _tolk.SpeakInterrupt(DescribeRecipeView(mode, mask));
+            return;
+        }
+
+        if (Environment.TickCount64 < _recipeViewDeadline) return;
+        _recipeViewPending = false;
+        _log.Warning($"[RecipeView] Ansicht nach {RecipeViewVerifyMs} ms unveraendert ({mode}).");
+        _tolk.SpeakInterrupt(AccessibilityStrings.RecipeViewUnchanged(RecipeViewName(mode)));
     }
 
     /// <summary>

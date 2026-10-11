@@ -4105,6 +4105,25 @@ public static partial class AccessibilityStrings
     public static string RecipeNoteOpened(string jobAndLevel) =>
         IsGerman ? $"Handwerker-Notizbuch, {jobAndLevel}"
                  : $"Crafting log, {jobAndLevel}";
+    /// <summary>Crafting log view toggle with more than one view unlocked
+    /// ("Rezeptansicht: Nach Stufe sortiert, Umschalter, 1 von 2").</summary>
+    public static string RecipeViewPosition(string view, int index, int total) =>
+        IsGerman ? $"Rezeptansicht: {view}, Umschalter, {index} von {total}"
+                 : $"Recipe view: {view}, toggle, {index} of {total}";
+    /// <summary>Crafting log view toggle when the game unlocks no other view.</summary>
+    public static string RecipeViewSingle(string view) =>
+        IsGerman ? $"Rezeptansicht: {view}, Umschalter, keine weitere Ansicht freigeschaltet"
+                 : $"Recipe view: {view}, toggle, no other view unlocked";
+    /// <summary>Fallback name of a view the game names from a table not yet identified.</summary>
+    public static string RecipeViewNumber(int number) =>
+        IsGerman ? $"Ansicht {number}" : $"View {number}";
+    /// <summary>Toggle sent, but the window still shows the same view after the wait.</summary>
+    public static string RecipeViewUnchanged(string view) =>
+        IsGerman ? $"Ansicht nicht gewechselt, weiter {view}"
+                 : $"View not changed, still {view}";
+    /// <summary>The window's view state could not be read.</summary>
+    public static string RecipeViewUnreadable =>
+        IsGerman ? "Rezeptansicht nicht lesbar." : "Recipe view not readable.";
     /// <summary>A list row with its position ("Destilliertes Wasser, Stufe 1, 3 von 12").</summary>
     public static string RowWithPosition(string row, int index, int total) =>
         IsGerman ? $"{row}, {index} von {total}" : $"{row}, {index} of {total}";
