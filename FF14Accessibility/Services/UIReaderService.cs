@@ -4163,6 +4163,11 @@ public sealed class UIReaderService : IDisposable
         }
         if (chat->ChannelSelectDropDown != null && owner == (AtkResNode*)chat->ChannelSelectDropDown->OwnerNode)
         {
+            // NUM0 opens the list and the cursor walks its entries, which are
+            // children of the same drop-down component (log 2026-10-11 15:20:42-
+            // 15:20:57: id=6, a new node per Numpad2). Naming the closed control
+            // there replaced every entry with "Chat-Modus wechseln, ...".
+            if (chat->ChannelSelectDropDown->IsOpen) return text;
             var label = LookupAddonText(ChatLogChannelDropDownLabelRow);
             return label.Length == 0 ? text : AccessibilityStrings.DropdownDesc(label, ReadChatChannel(chat));
         }
