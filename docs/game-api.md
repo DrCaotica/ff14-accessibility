@@ -3146,3 +3146,23 @@ Erkennung weiter nur über Spieldaten (ENpcBase.ENpcData), keine Namen.
 
 Offline-Zählung sqpack EN: +~186 NPCs nur über Indirection, ~666 schon direkt.
 
+
+## Toast „Die Änderungen wurden verworfen." beim ersten Login (2026-10-11)
+
+Gemessen mit LogMessageProbe (DEBUG, RaptureLogModule.ShowLogMessage* gehookt), Spielversion 2026.09.15.0000.0000:
+- Kommt bei JEDEM ersten Login nach Spielstart, nie bei weiteren Logins im selben Lauf (Logs 2026-10-05 bis 10-11, 9 von 9 / 0 von 6).
+- Quelle: `ShowLogMessage(4242)`, LogMessage-Zeile 4242 („Changes discarded."). Derselbe deutsche Wortlaut steht in 9 Zeilen
+  (868, 1769, 4242, 4296, 5245, 5297, 5523, 7905, 11191), der Text allein sagt also nichts.
+- Aufrufer, verifiziert in ffxiv_dx11.exe (.pdata-Funktionsgrenzen + E8-Aufrufziel vor jeder Ruecksprungadresse + Vtable):
+  `AgentSkyIslandFinderSetting` Vtable 0x1421C5BC8, Slot 5 (Hide) = 0x140CE0120; dort `call ShowLogMessage` mit edx=0x1092 (4242).
+  Hide wird gerufen von `AgentModule::HideAll` (0x140493FE0), das beim Uebergang Charakterauswahl -> Spiel laeuft
+  (Kette darueber: Framework-Task -> UIModule::Update -> RaptureAtkModule::UpdateUI -> ... -> 0x140101FB0 -> HideAll).
+- Bedingung in Hide (Hand-Disassembly): Meldung, wenn Feld+0x30 != Feld+0x34 ODER ein globaler Wert != Feld+0x38,
+  UND Byte+0x40 == 0; danach Byte+0x40 = 1. Das Byte wird in Hide nie zurueckgesetzt -> erklaert „nur einmal pro Spiellauf".
+  Was die Felder bedeuten: UNBELEGT.
+- SkyIsland = sehr wahrscheinlich das Diadem (gleiche Familie: SkyIslandExchange, SkyIslandEntranceEventHandler, GetSkyIslandDirector);
+  nicht direkt belegt.
+- Mod beteiligt? Nein, soweit messbar: Kette rein spielintern, die Mod beruehrt weder SkyIsland-Agenten noch HideAll (Grep leer).
+- Methode (Sonde danach entfernt): im Detour Stapel-Scan nach Werten im exe-Bereich (RtlCaptureStackBackTrace endet am Hook-Trampolin,
+  nur 1 Rahmen), Offsets gegen .pdata der exe und ClientStructs ida/data.yml (gleiche Spielversion) aufgeloest.
+  Dauerhaftes Werkzeug: `/acc findtext <Text>` (alle Sheets, Treffer + Nachbarzeilen -> Desktop\FFXIV_TextSearch.txt).
