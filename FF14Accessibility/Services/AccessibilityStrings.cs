@@ -1732,6 +1732,26 @@ public static partial class AccessibilityStrings
     public static string TabPressedNoPageChange => IsGerman ? "Reiter gedrückt, aber kein Seitenwechsel erkannt." : "Tab pressed, but no page change detected.";
     public static string TabNotResponding => IsGerman ? "Reiter reagiert nicht." : "Tab not responding.";
 
+    // ── HUD-Fokus (Numpad1, PAD_HUDFOCUS) ───────────────────────────
+    // Numpad1 cycles the cursor through these HUD areas (log 2026-10-11
+    // 13:11-13:32: JobHudNotice -> ScenarioTree -> ChatLog -> _ToDoList ->
+    // _NaviMap). A sighted player sees WHERE the cursor sits; the names below
+    // say it. Wording chosen by the user (Chat, Mini-Map, Job-Hinweis).
+    public static string HudRegionJobNotice => IsGerman ? "Job-Hinweis" : "Job notice";
+    public static string HudRegionScenario  => IsGerman ? "Szenario-Leitfaden" : "Scenario guide";
+    public static string HudRegionChat      => "Chat";
+    public static string HudRegionDutyList  => IsGerman ? "Auftragsliste" : "Duty list";
+    public static string HudRegionMiniMap   => IsGerman ? "Mini-Map" : "Mini-map";
+
+    /// <summary>"{region}, {text}" when the cursor enters a HUD area; the
+    /// region alone when the focused element has no text of its own.</summary>
+    public static string HudRegionWith(string region, string text) =>
+        string.IsNullOrEmpty(text) ? region : $"{region}, {text}";
+
+    /// <summary>A check box: "{label}, Schalter, an/aus".</summary>
+    public static string SwitchWithState(string label, bool on) =>
+        $"{label}, {SwitchControl}, {(on ? StateOn : StateOff)}";
+
     // ── Datenzentrum / Gamepad / Uebung / Menue ──────────────────────
     public static string ChooseDataCenter => IsGerman ? "Datenzentrum wählen." : "Choose a data center.";
     public static string GamepadCalibration => IsGerman ? "Gamepad-Kalibrierung. Escape zum Schließen." : "Gamepad calibration. Press Escape to close.";

@@ -3807,6 +3807,17 @@ public sealed class UIReaderService : IDisposable
         _lastFocusedNodePtr    = (nint)node;
         _lastFocusedNodeText   = text;
         _lastFocusedNodeStable = stable;
+        // HUD areas reached with Numpad1: name the area on entry. Decided here,
+        // on the real focus change, so moving inside an area adds no prefix.
+        var focusAddon = FindAddonNameForNode(node);
+        var hudRegion  = HudRegionName(focusAddon);
+        if (hudRegion != null)
+        {
+            text = DescribeHudRegionFocus(focusAddon, node, text);
+            if (focusAddon != _lastFocusAddonName)
+                text = AccessibilityStrings.HudRegionWith(hudRegion, text);
+        }
+        _lastFocusAddonName = focusAddon;
         // Real focus change: the new item counts as unannounced until the speak
         // below is actually reached (every return between here and there is a
         // suppression, and a suppressed name must not get a description).
@@ -3974,6 +3985,81 @@ public sealed class UIReaderService : IDisposable
             // reason — log 2026-09-28 09:16:00 / 09:19:58).
             _tolk.SpeakFocusInterrupt(text, (nint)node);
         }
+    }
+
+    // -- HUD-Fokus (Numpad1 = PAD_HUDFOCUS) ------------------------------------
+
+    /// <summary>Addon of the previous real focus change - an area name is
+    /// spoken only when the cursor ENTERS a HUD area.</summary>
+    private string _lastFocusAddonName = string.Empty;
+
+    /// <summary>
+    /// Name of the HUD area Numpad1 put the cursor in, or null for any other
+    /// window. The game cycles exactly these five (log 2026-10-11 13:11-13:32,
+    /// same order on every round).
+    /// </summary>
+    private static string? HudRegionName(string addonName) => addonName switch
+    {
+        "JobHudNotice" => AccessibilityStrings.HudRegionJobNotice,
+        "ScenarioTree" => AccessibilityStrings.HudRegionScenario,
+        "ChatLog"      => AccessibilityStrings.HudRegionChat,
+        "_ToDoList"    => AccessibilityStrings.HudRegionDutyList,
+        "_NaviMap"     => AccessibilityStrings.HudRegionMiniMap,
+        _              => null,
+    };
+
+    // JobHudNotice (dump 2026-10-11 13:25): Button id=5 carries the job name
+    // ("Mönch", text id=2), the notice itself is a separate component id=4
+    // with text id=2 ("Chakra-Balken erweitert!") - the focus never touches it.
+    private const uint JobHudNoticeTextCompId = 4;
+    private const uint JobHudNoticeTextId     = 2;
+
+    // _NaviMap (dump 2026-10-11 13:15): the focus lands on CheckBox id=4, which
+    // has neither text nor a bound tooltip. AddonNaviMap.ReceiveEvent shows its
+    // mouse-over tooltip from string [0] of StringArrayType.AreaMap ([HudProbe]
+    // 13:30:45 / 13:32:15: same pointer as the addon's tooltip field,
+    // "Norden/Blickrichtung nach oben ausrichten").
+    private const uint NaviMapRotationCheckBoxId = 4;
+
+    /// <summary>
+    /// Fills in what a sighted player sees on a focused HUD element that has no
+    /// text of its own. Returns <paramref name="text"/> unchanged otherwise.
+    /// </summary>
+    private unsafe string DescribeHudRegionFocus(string addonName, AtkResNode* node, string text)
+    {
+        var ptr = _gameGui.GetAddonByName(addonName);
+        if (ptr.IsNull) return text;
+        var addon = (AtkUnitBase*)(nint)ptr;
+
+        if (addonName == "JobHudNotice")
+        {
+            var wrap = FindTopLevelNode(addon, JobHudNoticeTextCompId);
+            if (wrap == null || (int)wrap->Type < 1000 || !wrap->IsVisible()) return text;
+            var comp = ((AtkComponentNode*)wrap)->Component;
+            if (comp == null) return text;
+            var notice = ReadComponentTextById(comp, JobHudNoticeTextId).Trim();
+            return notice.Length == 0 ? text : AccessibilityStrings.HudRegionWith(text, notice);
+        }
+
+        if (addonName == "_NaviMap")
+        {
+            var owner = FindTopLevelOwner(addon, node, out _);
+            if (owner == null || owner->NodeId != NaviMapRotationCheckBoxId || (int)owner->Type < 1000) return text;
+            var comp = ((AtkComponentNode*)owner)->Component;
+            if (comp == null || comp->GetComponentType() != ComponentType.CheckBox) return text;
+            var stage = AtkStage.Instance();
+            var strings = stage == null ? null : stage->GetStringArrayData(StringArrayType.AreaMap);
+            if (strings == null || strings->AtkArrayData.Size < 1 || strings->StringArray[0].Value == null)
+            {
+                _log.Warning("[HudFocus] Mini-Map: Tooltip-Text (AreaMap[0]) fehlt.");
+                return text;
+            }
+            var label = Dalamud.Memory.MemoryHelper.ReadSeStringNullTerminated((nint)strings->StringArray[0].Value).TextValue.Trim();
+            if (label.Length == 0) return text;
+            return AccessibilityStrings.SwitchWithState(label, ((AtkComponentButton*)comp)->IsChecked);
+        }
+
+        return text;
     }
 
     // -- Charaktererstellung: Auswahl folgt dem Fokus (V4.93) ----------------
