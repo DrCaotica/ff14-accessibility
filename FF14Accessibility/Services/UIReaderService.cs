@@ -4073,6 +4073,9 @@ public sealed class UIReaderService : IDisposable
             return text;
         }
 
+        if (addonName == "ChatLog")
+            return DescribeChatLogFocus((AddonChatLog*)addon, node, text);
+
         if (addonName == "_NaviMap")
         {
             var owner = FindTopLevelOwner(addon, node, out _);
@@ -4099,6 +4102,57 @@ public sealed class UIReaderService : IDisposable
             }
         }
 
+        return text;
+    }
+
+    // ChatLog bottom bar (dump 2026-10-11 14:15, Numpad4 chain logged 14:21):
+    // input field id=5 -> channel drop-down id=3 -> buttons 13, 10, 9. None has
+    // text. AddonChatLog's setup (0x1412D5970, disassembly 2026-10-11) binds
+    // each button's mouse-over tooltip from the Addon sheet: node 9 = 1095
+    // "Neuer Reiter", 10 = 1096 "Chatlog-Einstellungen", 12 = 1097 (novice
+    // network list, hidden for non-members), 13 = 13736 "Chatlog verbergen",
+    // and the channel drop-down = 13737 "Chat-Modus wechseln". The rows are
+    // read here rather than through TooltipService: the window is built once
+    // at login, so after a plugin reload that live map has no entry for them.
+    // ClientStructs names node 9 AddTabComponentNode and 10
+    // SettingsComponentNode ([ChatProbe] 14:27:04 compared the pointers).
+    private static readonly Dictionary<uint, uint> ChatLogButtonLabelRows = new()
+    {
+        [9]  = 1095,
+        [10] = 1096,
+        [12] = 1097,
+        [13] = 13736,
+    };
+    private const uint ChatLogChannelDropDownLabelRow = 13737;
+
+    /// <summary>
+    /// Names the focused element of the chat window's bottom bar: the input
+    /// field with its send channel, the channel drop-down, or one of the icon
+    /// buttons by the game's own tooltip text.
+    /// </summary>
+    private unsafe string DescribeChatLogFocus(AddonChatLog* chat, AtkResNode* node, string text)
+    {
+        var owner = FindTopLevelOwner(&chat->AtkUnitBase, node, out _);
+        if (owner == null || (int)owner->Type < 1000) return text;
+        var comp = ((AtkComponentNode*)owner)->Component;
+        if (comp == null) return text;
+
+        if (chat->TextInput != null && owner == (AtkResNode*)chat->TextInput->OwnerNode)
+        {
+            var channel = ReadChatChannel(chat);
+            return channel.Length == 0 ? AccessibilityStrings.ChatInput : AccessibilityStrings.ChatInputWithChannel(channel);
+        }
+        if (chat->ChannelSelectDropDown != null && owner == (AtkResNode*)chat->ChannelSelectDropDown->OwnerNode)
+        {
+            var label = LookupAddonText(ChatLogChannelDropDownLabelRow);
+            return label.Length == 0 ? text : AccessibilityStrings.DropdownDesc(label, ReadChatChannel(chat));
+        }
+        if (comp->GetComponentType() == ComponentType.Button
+            && ChatLogButtonLabelRows.TryGetValue(owner->NodeId, out var row))
+        {
+            var label = LookupAddonText(row);
+            return label.Length == 0 ? text : AccessibilityStrings.HudButton(label);
+        }
         return text;
     }
 
@@ -10619,10 +10673,11 @@ public sealed class UIReaderService : IDisposable
     /// </summary>
     private unsafe void OnChatLogUpdate(AddonEvent type, AddonArgs args)
     {
-        if (!_config.EchoChatInput) return;
-
         var addon = (AddonChatLog*)(nint)args.Addon;
         if (addon == null) return;
+        AnnounceHudChatTab(addon);
+
+        if (!_config.EchoChatInput) return;
         var input = addon->TextInput;
         if (input == null) return;
 
@@ -10673,6 +10728,55 @@ public sealed class UIReaderService : IDisposable
             _lastChatEcho = text;
             _log.Info($"[Chat] Echo: '{TolkService.Sanitize(text)}'");
         }
+    }
+
+    /// <summary>Tab index the chat window showed on the previous frame, -1
+    /// before the first frame. Kept current on every frame, so only a change
+    /// made while the cursor is in the chat window is spoken.</summary>
+    private int _hudChatTabIndex = -1;
+
+    /// <summary>
+    /// Speaks the new tab when Numpad7 / Numpad9 switch it while Numpad1 has put
+    /// the cursor in the chat window ([ChatProbe] 2026-10-11 14:07:11 / 14:07:14:
+    /// TabIndex 0 -> 2 -> 0 of 3, wrapping, nothing spoken). The new chat system
+    /// already follows the tab on its own (Plugin.FollowChatTab), so this only
+    /// speaks while the legacy system is the one talking.
+    /// </summary>
+    private unsafe void AnnounceHudChatTab(AddonChatLog* chat)
+    {
+        int index = chat->TabIndex;
+        if (index == _hudChatTabIndex) return;
+        var first = _hudChatTabIndex < 0;
+        _hudChatTabIndex = index;
+        if (first || !_config.UseLegacyChatSystem || !IsChatWindowFocused()) return;
+
+        if (index >= chat->TabCount)
+        {
+            _log.Warning($"[HudFocus] Chat-Reiter {index} ausserhalb TabCount={chat->TabCount}.");
+            return;
+        }
+        var name = TolkService.Sanitize(chat->TabNames[index].ToString()).Trim();
+        _log.Info($"[HudFocus] Chat-Reiter {index + 1}/{chat->TabCount} '{name}'");
+        if (name.Length == 0) return;
+        _tolk.SpeakInterrupt(AccessibilityStrings.ChatLogTab(name, index + 1, chat->TabCount));
+    }
+
+    /// <summary>Whether the game's cursor is in the chat window - its bar or its
+    /// message panel (focused-units list, [ChatProbe] 2026-10-11 14:07:03 /
+    /// 14:07:08).</summary>
+    private static unsafe bool IsChatWindowFocused()
+    {
+        var mgr = RaptureAtkUnitManager.Instance();
+        if (mgr == null) return false;
+        var list = mgr->AtkUnitManager.FocusedUnitsList;
+        for (var i = 0; i < list.Count && i < list.Entries.Length; i++)
+        {
+            var unit = list.Entries[i].Value;
+            if (unit == null) continue;
+            var name = unit->NameString;
+            if (name == "ChatLog" || name.StartsWith("ChatLogPanel_", StringComparison.Ordinal)) return true;
+        }
+        return false;
     }
 
 #if DEBUG

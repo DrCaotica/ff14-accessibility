@@ -1754,6 +1754,16 @@ public static partial class AccessibilityStrings
     public static string MiniMapZoomIn  => IsGerman ? "Hineinzoomen, Knopf" : "Zoom in, button";
     public static string MiniMapZoomOut => IsGerman ? "Herauszoomen, Knopf" : "Zoom out, button";
 
+    /// <summary>An icon button in a HUD area, named by the game's own tooltip
+    /// text ("Chatlog-Einstellungen, Knopf").</summary>
+    public static string HudButton(string label) =>
+        IsGerman ? $"{label}, Knopf" : $"{label}, button";
+
+    /// <summary>The chat window switched its tab while the cursor is in it
+    /// ("Reiter Kampf, 2 von 3").</summary>
+    public static string ChatLogTab(string name, int index, int count) =>
+        IsGerman ? $"Reiter {name}, {index} von {count}" : $"Tab {name}, {index} of {count}";
+
     /// <summary>Weather icon of the mini-map; the weather name is the game's
     /// own mouse-over text ("Regnerisch").</summary>
     public static string MiniMapWeather(string weather) =>
