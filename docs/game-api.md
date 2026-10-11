@@ -3165,6 +3165,11 @@ Quelle: Keybind-Dump, Log 13:11-13:54, UI-Dumps, Disassembly ffxiv_dx11.exe 2026
     9 = 1095 „Neuer Reiter“, 10 = 1096 „Chatlog-Einstellungen“, 12 = 1097 „Teilnehmerliste des
     Neulings-Chats anzeigen“, 13 = 13736 „Chatlog verbergen“, Kanal-Auswahl = 13737 „Chat-Modus wechseln“.
     Nach einem Plugin-Reload fehlen sie im TooltipService (Fenster wird nur beim Login gebaut).
+  - Num0 auf der Kanal-Auswahl (DropDown id=3): ButtonClick param 0, `IsOpen`, Cursor auf
+    Listeneintrag id=6 (je Num2 neuer Knoten, rundum): Sagen, Gruppe, Allianz, Rufen, Schreien,
+    Freie Gesellschaft, Flüstern (2026-10-11 15:23). Keine Tooltips zu den Einträgen: Tooltip-
+    Fenster bei offener Liste leer, `AtkTooltipManager.TooltipMap` ohne Eintrag für Cursor und
+    8 Eltern (Sonde 15:26). Geschlossen zeigt das Spiel den Tooltip „Chat-Modus wechseln“.
   - Num0 auf Knopf 9: ButtonClick param 1 → `InputString` „Reiter-Name“ (Vorgabe „Reiter 4“).
   - Num7/Num9: `TabIndex` −1/+1 rundum über `TabCount` (3). Entgegen dem Kommentar in
     ChatTabControl.cs gibt es also eine Spieltaste für die Chat-Reiter (im HUD-Fokus).
