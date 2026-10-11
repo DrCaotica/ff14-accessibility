@@ -61,6 +61,30 @@ public sealed class PlacesService
     private static float PixelToWorld(float pixel, ushort sizeFactor, short offset)
         => (pixel - 1024f) * 100f / sizeFactor - offset;
 
+    /// <summary>
+    /// Player-facing map coordinates (the 1..~42 numbers) to world X/Z.
+    /// Y is 0. Same formula as <see cref="MapCoordToWorld"/>, for a map whose
+    /// scale and offset the caller already has. A scale of 0 cannot convert.
+    /// </summary>
+    public static Vector3? ConvertMapCoord(float mapX, float mapY, ushort sizeFactor, short offsetX, short offsetY)
+    {
+        if (sizeFactor == 0) return null;
+        var pixelX = (mapX - 1f) * sizeFactor / 2f;
+        var pixelY = (mapY - 1f) * sizeFactor / 2f;
+        return new Vector3(PixelToWorld(pixelX, sizeFactor, offsetX), 0f, PixelToWorld(pixelY, sizeFactor, offsetY));
+    }
+
+    /// <summary>The name to speak for a PlaceName row: Russian when the row is
+    /// translated, otherwise the sheet name.
+    ///
+    /// Die Blaetter liefern in dieser Installation ENGLISCH - das Rusik
+    /// uebersetzt nur, was gezeichnet wird. Ohne diesen Rueckweg hoert die
+    /// Spielerin "Eastern Thanalan", waehrend auf ihrer Karte "Восточный
+    /// Таналан" steht. Die Zeilen-Id kennt keine Sprache, der Name schon.
+    /// Ohne Uebersetzung bleibt es beim Blattnamen, nie bei Schweigen.</summary>
+    private static string PlaceNameText(uint rowId, string? sheetName)
+        => RussianAuthorText.PlaceName(rowId, sheetName?.Trim() ?? string.Empty);
+
     /// <summary>Inverse of <see cref="PixelToWorld"/>: world coordinate back to
     /// map pixel (0..2048). Solving world = (pixel-1024)*100/scale - offset for
     /// pixel gives pixel = (world+offset)*scale/100 + 1024.</summary>
@@ -88,13 +112,28 @@ public sealed class PlacesService
             return null;
         }
 
-        var pixelX = (mapX - 1f) * map.SizeFactor / 2f;
-        var pixelY = (mapY - 1f) * map.SizeFactor / 2f;
-        var worldX = PixelToWorld(pixelX, map.SizeFactor, map.OffsetX);
-        var worldZ = PixelToWorld(pixelY, map.SizeFactor, map.OffsetY);
+        var world = ConvertMapCoord(mapX, mapY, map.SizeFactor, map.OffsetX, map.OffsetY);
+        if (world is not { } point) return null;
         _log.Info($"[Goto] Karte {mapX:0.0}/{mapY:0.0} (Map {mapId}, Scale {map.SizeFactor}, " +
-                  $"Off {map.OffsetX}/{map.OffsetY}) -> Welt {worldX:0.0}/{worldZ:0.0}");
-        return new Vector3(worldX, 0f, worldZ);
+                  $"Off {map.OffsetX}/{map.OffsetY}) -> Welt {point.X:0.0}/{point.Z:0.0}");
+        return point;
+    }
+
+    /// <summary>
+    /// Same conversion as <see cref="MapCoordToWorld"/> for a map the player is
+    /// not necessarily standing on. Hunt spawns name the habitat map, which is
+    /// the current map only after the zone hop.
+    /// </summary>
+    public Vector3? MapCoordToWorldOnMap(uint mapId, float mapX, float mapY)
+    {
+        if (mapId == 0) return null;
+        if (!_data.GetExcelSheet<Map>().TryGetRow(mapId, out var map))
+        {
+            _log.Info($"[Goto] Map {mapId} nicht im Sheet - keine Kartenkoordinate.");
+            return null;
+        }
+
+        return ConvertMapCoord(mapX, mapY, map.SizeFactor, map.OffsetX, map.OffsetY);
     }
 
     /// <summary>
@@ -224,7 +263,11 @@ public sealed class PlacesService
             var isTransition = false;
             var targetMapId = 0u;
 
-            var subtext = m.PlaceNameSubtext.ValueNullable?.Name.ExtractText() ?? string.Empty;
+            // Russisch zuerst: das Blatt liefert in dieser Installation Englisch,
+            // die Karte der Spielerin traegt den uebersetzten Namen (dieselbe
+            // Ursache wie bei Monstern und Quests). Ohne Uebersetzung bleibt es
+            // beim Blattnamen.
+            var subtext = PlaceNameText(m.PlaceNameSubtext.RowId, m.PlaceNameSubtext.ValueNullable?.Name.ExtractText());
 
             switch (m.DataType)
             {
@@ -234,7 +277,7 @@ public sealed class PlacesService
                     if (m.DataKey.TryGetValue<Map>(out var targetMap))
                     {
                         targetMapId = targetMap.RowId;
-                        name = targetMap.PlaceName.ValueNullable?.Name.ExtractText() ?? string.Empty;
+                        name = PlaceNameText(targetMap.PlaceName.RowId, targetMap.PlaceName.ValueNullable?.Name.ExtractText());
                     }
                     if (string.IsNullOrWhiteSpace(name)) name = subtext;
                     if (string.IsNullOrWhiteSpace(name)) continue;
@@ -245,7 +288,7 @@ public sealed class PlacesService
 
                 case 3: // Ätheryt (DataKey = Aetheryte-Zeile)
                     name = m.DataKey.TryGetValue<Aetheryte>(out var aetheryte)
-                        ? aetheryte.PlaceName.ValueNullable?.Name.ExtractText() ?? string.Empty
+                        ? PlaceNameText(aetheryte.PlaceName.RowId, aetheryte.PlaceName.ValueNullable?.Name.ExtractText())
                         : string.Empty;
                     if (string.IsNullOrWhiteSpace(name)) name = subtext;
                     if (string.IsNullOrWhiteSpace(name)) name = AccessibilityStrings.AetheryteFallbackName;
@@ -254,7 +297,7 @@ public sealed class PlacesService
 
                 case 4: // Aethernet-Scherbe (DataKey = PlaceName)
                     name = m.DataKey.TryGetValue<PlaceName>(out var placeName)
-                        ? placeName.Name.ExtractText()
+                        ? PlaceNameText(placeName.RowId, placeName.Name.ExtractText())
                         : subtext;
                     if (string.IsNullOrWhiteSpace(name)) continue;
                     type = "Aethernet";

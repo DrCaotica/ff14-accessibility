@@ -45,7 +45,7 @@ public sealed class MenuEntry
     /// show/hide-hotbars list, where you want to flip several in a row and hear
     /// the new state each time).
     /// </summary>
-    public bool StayOpen { get; init; }
+    public bool StayOpen { get; set; }
 }
 
 /// <summary>A titled list of entries, plus the builder that produced it.</summary>
@@ -134,6 +134,8 @@ public sealed class MenuInput
     }
 
     public bool Just(int vk) => vk is >= 0 and < 256 && _just[vk];
+    public bool Down(int vk) => vk is >= 0 and < 256 && _down[vk];
+    public bool AnyDown => _tracked.Any(vk => _down[vk]);
 
     public bool JustAny(params int[] vks)
     {

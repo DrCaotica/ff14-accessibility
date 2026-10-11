@@ -107,7 +107,7 @@ public sealed class ActionSignalProbe
         if (am == null || hotbars == null || ps == null)
         {
             _log.Warning("[ActionProbe] ActionManager/Hotbars/PlayerState nicht verfuegbar.");
-            _tolk.Speak("Sonde nicht moeglich.");
+            _tolk.Speak(AccessibilityStrings.ProbeUnavailable);
             return;
         }
 
@@ -142,7 +142,7 @@ public sealed class ActionSignalProbe
 
         foreach (var line in lines) _log.Info(line);
         _log.Info($"[ActionProbe] {lines.Count} Aktionen auf den Leisten.");
-        _tolk.Speak($"Sonde: {lines.Count} Aktionen ins Log geschrieben.");
+        _tolk.Speak(AccessibilityStrings.ActionProbeSaved(lines.Count));
     }
 
     private unsafe string Describe(ActionManager* am, uint id, ulong targetId)
@@ -286,7 +286,7 @@ public sealed class ActionSignalProbe
                 break;
             case 33: // AST
                 var ast = _gauges.Get<Dalamud.Game.ClientState.JobGauge.Types.ASTGauge>();
-                if (ast != null) _log.Info($"[ActionProbe] AST Cards={string.Join('/', ast.DrawnCards)} Crown={ast.DrawnCrownCard}");
+                if (ast != null) _log.Info($"[ActionProbe] AST Cards={ast.Card1}/{ast.Card2}/{ast.Card3} Crown={ast.DrawnCrownCard}");
                 break;
             case 3:    // Marodeur - hat nachweislich keine Anzeige (Sheet 2026-09-01)
                 _log.Info("[ActionProbe] Marodeur: keine Job-Anzeige (keine Aktion mit Anzeige-Kosten).");

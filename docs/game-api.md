@@ -452,6 +452,26 @@ Zeichen selbst (V4.90). Quelle:
   AreaObject, HousingEventObject, Cutscene, ReactionEventObject, Ornament,
   CardStand (NICHT „Player"/„MountType"!)
 
+### Freund / Feind: Nameplate-Farbe + CombatSide (2026-10-04)
+
+Gegner und Verbündete sind beide oft `ObjectKind.BattleNpc`. Die Trennung
+liegt in `CombatSide` (Browser, Peilton, Cast-Warnungen):
+
+- **Begleiter-SubKinds** (`IBattleNpc.BattleNpcKind`): Pet, Buddy, Player,
+  RaceChocobo, LovmMinion, NpcPartyMember → Verbündete.
+- **Gruppe/Allianz**: `StatusFlags.PartyMember` / `AllianceMember`.
+- **Nameplate-Farbe** `GameObject.GetNamePlateColorType()` (sichtbare
+  Spiel-UI, ClientStructs-Remarks):
+  - Feind: **4, 5, 6** (PvP Lim/Gri/Uld), **7** UnengagedEnemy (auch
+    ungepulled), **9** Engaged, **10** Claimed, **11** Unclaimed.
+  - Freundlicher Kampf-NPC: **12, 13** (`NamePlateColorNpc`).
+- **`StatusFlags.Hostile`** (= `CharacterData.Flags` Bit 0 / `IsHostile`) ist
+  das Spawn-Flag „hostile“ und steuert die Nameplate — **nicht** Aggro.
+  Aggro = Bit 1 `InCombat` bzw. Nameplate 9–11. ObjProbe loggt Hostile zum
+  Abgleich; die Entscheidung nutzt die Nameplate.
+- ObjProbe (`/acc objprobe` / Strg+F5): loggt `sub`, `plate`, `hostile`,
+  `combat`, `party`, `alliance`, `ally`, `enemy` pro Objekt.
+
 ### SetHardTarget kann ABLEHNEN (ilspycmd + Live-Log 2026-07-10, 16:39)
 - `TargetSystem.SetHardTarget(GameObject*, bool ignoreTargetModes, bool a4,
   int a5)` gibt **bool** zurück — das Spiel kann die Zieländerung verweigern.
@@ -1212,17 +1232,35 @@ sind **nicht** die FF15-Kollab-FATE (siehe unten). Historisch V6.07:
 - Probe Location→`planevent.lgb` `LayerEntryType.EventRange` (49): **15/15**
   mit Territory + World-Position. Yo-kai setzt diese Flags NICHT.
 
-### Events / Yo-kai + Collab-Event-FATEs (V6.08 + 2026-09-24)
-- Kategorie-Label: „Events“.
-- **Yo-kai:** nur mit Yo-kai-Uhr (Item 15222 / EventItem 2001948). WORKAROUND:
-  Territory-Ids aus dem Event-Guide; Position = Ätheryt.
-- **Collab Event-FATEs** (FFXV „A Nocturne for Heroes“): Fate **1409**
-  DE „Die mechanischen Krieger“ / EN „Like Clockwork“. Offline 2026-09-24:
-  `AdventEvent=MoonFaire=SpecialFate=false` — Flags greifen nicht.
-  WORKAROUND: Fate-RowId in `EventAreaService.CollabEventFateIds`; Name +
-  Spawn aus Sheet `Fate.Location` → `planevent.lgb` EventRange
-  (terr **141** Zentrales Thanalan, pos ≈ 292|-16|-20).
-- In der Zone: Kategorie „FATEs“ für das live FATE.
+### Events / laufende Festivals (2026-10-06)
+Kategorie „Events“ liest, was der Client gerade eingeschaltet hat. Abgelaufene
+Events stehen nicht mehr in der Liste; ein neues Festival erscheint von selbst.
+
+- `GameMain.Instance()->ActiveFestivals`: `Span<GameMain.Festival>`, Länge 8.
+  `Festival.Id` (ushort), `Festival.Phase` (ushort). Id 0 = freier Slot.
+  Dieselbe DLL: `PlayerState.ActiveFestivalIds` / `ActiveFestivalPhases`.
+- Sheet `Quest`: `Festival` (RowRef), `FestivalBegin`/`FestivalEnd` (byte,
+  inklusive), `IssuerLocation` (Level: Territory, Map, X/Y/Z).
+- Offline sqpack DE 2026-10-06: 310 Quests mit Festival ≠ 0, 120 Festival-Ids.
+  Sheet `Festival` hat 264 Zeilen und **keinen** Namen (alle leer). Gesprochen
+  wird der Quest-Name. Pro Festival und Gebiet nur die kleinste Quest-Zeile,
+  deren Phase im Bereich liegt.
+- Fate 1409 (FFXV) hat `RequiredQuest=0` und die Event-Flags nicht. Er hängt
+  am Festival über das Quest-Skript: `Quest.QuestParams` mit Anweisung
+  `FATE0`, `FATE1`, … und `ScriptArg` = Fate-Zeile. Andere Anweisungen
+  (`LOC_MOTION0`) können dieselbe Zahl tragen und sind kein FATE.
+  Offline DE 2026-10-06: 52 solche Slots in 23 Festivals, darunter 1409 über
+  Quest 68694, Festival 84.
+- `Fate.Location` ist die Instanz-Id eines `EventRange` in `planevent.lgb`
+  (Typ 49), nicht eine Level-Zeile. Mehrere TerritoryType teilen sich die
+  Datei. Genommen wird `TerritoryIntendedUse` 0 (Stadt) oder 1 (Feld), bei
+  Gleichstand die kleinste Zeile. Instanz-Kopien (Use 9/29) bleiben draußen.
+  44 von 44 gemessenen Orten lagen in diesen Layouts; 67 Dateien, etwa 0,1 s.
+  Ein Ort ohne lesbare Position erscheint nicht. Die Phase kommt von der
+  Quest, die den Slot trägt, nicht vom Layer (`FestivalID` ist dort oft 0).
+- Läuft das FATE gerade in der Zone, bleibt der Fortschritt in der Kategorie
+  „FATEs“. Die Event-Liste nennt den festen Ort auch, solange die Phase läuft.
+- Historisch (nicht mehr im Code): Yo-kai-Territories und `CollabEventFateIds`.
 
 ### FF15-Kollab Garuda / Warp-Angriff (2026-09-24)
 - Duty: CFC 646 DE „Durch den Sturm und zurück“ / EN Messenger of the Winds,
@@ -3145,4 +3183,89 @@ Erkennung weiter nur über Spieldaten (ENpcBase.ENpcData), keine Namen.
 - **Ein Hop:** CustomTalk.SpecialLinks → SpecialShop|CollectablesShop
 
 Offline-Zählung sqpack EN: +~186 NPCs nur über Indirection, ~666 schon direkt.
+
+## Sortierte Taschen/Arsenal: Anzeige-Position ≠ Container-Platz (gemessen 2026-10-05, PR 34)
+
+- Die Reihenfolge im Fenster kommt aus `ItemOrderModule` (`ItemOrderModule.Instance()`),
+  je Behälter ein `ItemOrderModuleSorter`: `InventorySorter`, `ArmourySorter[12]`
+  (`ArmouryMainHandSorter` … `ArmourySoulCrystalSorter`), Satteltaschen, Gehilfen.
+- `Sorter->Items[anzeigeIndex]` → `ItemOrderModuleSorterItemEntry { Page, Slot, Index }`.
+  Im Arsenal ist `Page` 0 und `Slot` der echte Container-Platz (`ItemsPerPage` 35, Haupthand 50).
+- Unsortiert ist das die Identität. Nach `/sort def Beine ggstufe abs` + `/sort los Beine`:
+  11 von 35 Einträgen verschoben (PR 34, Sonde wieder entfernt).
+- `AgentItemDetail.Index` ist der Anzeige-Index, nicht der Platz.
+  `AgentItemDetail.OnItemHovered` liefert Container und Platz. Gemessen: bei 12
+  Fokuswechseln gleich dem Sorter-Eintrag, zwei gleiche Hosen getrennt.
+- Hier liest der Fokus die Instanz zuerst über die Sortierkarte des eigenen Slots
+  (`ItemSlotService.InstanceAt`), sonst über den Hover-Hook, sonst über das einzige
+  eigene Exemplar. Zustand und Bindung kommen von dieser Instanz (`ItemWearText`),
+  nicht aus dem Tooltip-Text, der dem Cursor hinterherhinkt.
+
+### `/sort` im deutschen Client
+
+- Befehl: `/sort` = `/sortieren` = `/itemsort` = `/isort` (Sheet `TextCommand` Zeile 210).
+- Die erlaubten Wörter stehen in Sheet `TextCommandParam`, nicht im Hilfetext:
+  `def`/`condition`, `los`/`execute`, `zurück`/`clear`, `ggstufe`, `aufs`/`asc`, `abs`/`des`.
+- Der Hilfetext nennt „aufsteigend, absteigend“. Das Spiel lehnt die ausgeschriebenen
+  Wörter ab (getestet 2026-10-05). Ohne Reihenfolge-Wort sortiert es aufsteigend.
+- Sortieren ändert nur die Anzeige-Reihenfolge.
+
+## Charakterfenster und Händler (PR 34, auf den Stand von PR 31 gesetzt)
+
+- `AddonCharacter` hat kein Slot-Array. Der DragDrop-Param nennt den Platz:
+  Param 1–5 = Container 0–4, Param 6–13 = Container 6–13. Container 5 ist der
+  abgeschaffte Gürtel. Leeres Icon ist `uint.MaxValue`, nicht 0. Namen aus
+  Addon-Zeilen 738–751, „Leer“ aus Zeile 4947.
+- Zustand nur bei `ClassJobRepair != 0`, Bindung nur bei `MaterializeType != 0`.
+  Beschriftung Addon 498/499. Bindung Rohwert 0–10000, Nachkommastellen abgeschnitten.
+  Unter 1 % zeigt das Spiel „1 %“ (eine Messung, im Code als WORKAROUND).
+- Arsenal-Kategorieknöpfe spricht dieser Stand nicht extra: PR 31 ersetzt das
+  Blättern dort durch die Arsenalliste. Beim Kategoriewechsel (7/9) sagt die
+  Liste „Kategorie: Name, Anzahl“.
+
+## Gesprochenes Inventar: Kontextmenü (2026-10-06)
+
+- Strg+F3 bleibt die Kategorienliste (`Item.ItemUICategory`). Gil liest nur
+  den Betrag. Eine Kategorie öffnet die Gegenstände. Num4 geht zurück.
+- Num0 auf einem Gegenstand ruft `AgentInventoryContext.OpenForItemSlot`
+  mit dem physischen Container und Slot aus `IGameInventory.GetInventoryItems`
+  auf. Das ist der Index im Behälter, nicht die Anzeigeposition von
+  `ItemOrderModule`. `a4` bleibt 0, wie bei Arsenalliste und Sammeltransfer.
+- Besitzerfenster: sichtbares Addon `Shop`, sonst sichtbares
+  `Inventory` / `InventoryLarge` / `InventoryExpansion`. Ein verstecktes
+  Inventar-Addon nimmt `OpenForItemSlot` an und zeichnet kein Menü
+  (dalamud.log 2026-10-06 23:34, owner 16, `bagVisible=False`; dasselbe
+  Fach mit sichtbarem Shop um 23:35 zeichnete `ContextMenu`).
+- Ist keines dieser Fenster sichtbar, ruft das Plugin
+  `UIModule.ExecuteMainCommand(10)` auf. Zeile 10 im Blatt `MainCommand`
+  dieser Installation (sqpack 2026-10-06) heißt englisch „Inventory“ und
+  deutsch „Inventar“, Kategorie 1. Das ist derselbe Weg wie die Taste I.
+  Der Befehl wird einmal gesendet, weil er umschaltet. Das Menü gilt erst
+  als offen, wenn das Addon `ContextMenu` sichtbar ist. Nur das
+  Gil-Shop-Fenster liefert die Verkaufszeile. SpecialShop, Marktbrett und
+  Gehilfe sind nicht dieser Weg.
+- Das Plugin klickt keine Zeile. Menge und Ja/Nein bleiben die vorhandenen
+  Leser. Die öffnende Num0 (und Num6 / Rechts, falls die das Menü bestätigt
+  haben) wird bis zum Loslassen aus dem Tastenstatus genommen.
+- Die Übergabe `Request` liest bei Strg+F3 weiter die Abgabe-Gitter.
+
+## Arsenal nach Klassen (2026-10-06)
+
+- Die geöffnete Arsenaltruhe spricht zuerst die Klassen, in denen etwas liegt.
+  Die Gruppe ist eine Zeile `Item.ClassJobCategory`. Ein Teil, das mehrere
+  Klassen tragen können, bleibt in dieser einen Zeile.
+- Ein Satzname („All Classes“, „Disciple of War“, „Tank (excluding limited jobs)“)
+  kommt aus dem Blatt der Ansagesprache. Deutsch, sqpack 2026-10-06:
+  „Alle Klassen“, „Krieger“, „Verteidiger (außer beschränkte Jobs)“.
+- Eine Abkürzungsliste („GLA MRD PLD“) wird nicht vorgelesen. Die deutschen
+  Kürzel sind andere Zeichen (deutsch SCH = Schurke, englisch SCH = Gelehrter).
+  Die erlaubten Jobs kommen aus den bool-Spalten und heißen mit `ClassJob.Name`.
+- 0 öffnet die Klasse. In der Klasse öffnet 0 das Spielmenü derselben Zelle.
+  Plus (`VK_ADD`, mit und ohne NumLock) geht zurück zu den Klassen. 4 und 6
+  bleiben der vorige und der nächste Gegenstand. 7 und 9 springen innerhalb
+  der Klasse zur vorigen oder nächsten Ausrüstungsart. Entf schließt die Truhe.
+- Die Gegenstände in der Truhe werden nicht verschoben.
+- Händler-Menge spricht der Editor aus PR 31 (`ShopQuantityEdit`). Die
+  Gegenstandsart der Zeile kommt zusätzlich aus `DescribeItemBasics`
+  (`Item.ItemUICategory`), für Rüstung also der Slot.
 

@@ -1,4 +1,4 @@
-﻿using System.Collections.Generic;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
@@ -6,7 +6,9 @@ using System.Text;
 using Dalamud.Game.Addon.Lifecycle;
 using Dalamud.Game.Addon.Lifecycle.AddonArgTypes;
 using Dalamud.Plugin.Services;
+using Dalamud.Game;
 using FFXIVClientStructs.FFXIV.Client.UI;
+using FFXIVClientStructs.FFXIV.Client.Game;
 using FFXIVClientStructs.FFXIV.Client.UI.Agent;
 using FFXIVClientStructs.FFXIV.Client.UI.Arrays;
 using FFXIVClientStructs.FFXIV.Component.GUI;
@@ -14,12 +16,21 @@ using DetailKind = FFXIVClientStructs.FFXIV.Client.Enums.DetailKind;
 using LuminaAction = Lumina.Excel.Sheets.Action;
 using LuminaActionTransient = Lumina.Excel.Sheets.ActionTransient;
 using LuminaTrait = Lumina.Excel.Sheets.Trait;
+using LuminaCraftAction = Lumina.Excel.Sheets.CraftAction;
 using LuminaMount = Lumina.Excel.Sheets.Mount;
 using LuminaCompanion = Lumina.Excel.Sheets.Companion;
 
 namespace FF14Accessibility.Services;
 
-public sealed class UIReaderService : IDisposable
+public enum ArmouryMenuActionResult
+{
+    NotReady,
+    WrongItem,
+    Unavailable,
+    Requested,
+}
+
+public sealed partial class UIReaderService : IDisposable
 {
     private enum ScreenContext
     {
@@ -33,6 +44,7 @@ public sealed class UIReaderService : IDisposable
     private readonly IGameGui        _gameGui;
     private readonly TolkService     _tolk;
     private readonly IPluginLog      _log;
+    private readonly GameDescriptionService _descriptions;
     private readonly IObjectTable    _objectTable;
     private readonly InventoryService _inventory;
     private readonly GearInfoService _gearInfo;
@@ -157,6 +169,7 @@ public sealed class UIReaderService : IDisposable
     // Addons mit eigenem PostSetup-Handler � Universal-OnOpen �berspringt diese
     private static readonly HashSet<string> SpecialSetupAddons =
     [
+        "SelectOk",
         "Talk", "TalkSubtitle", "SelectYesno", "SelectString", "SelectIconString",
         "_TextError", "_WideText", "_BattleTalk", "_LocationTitle",
         "LevelUpAnnouncement", "ContentsTutorial", "_ScreenText",
@@ -194,14 +207,20 @@ public sealed class UIReaderService : IDisposable
         // und wurden nicht mitgelesen, Fokus sprang auf „Schließen“
         // (Dump/Log 2026-09-20 GrandCompanyRank).
         "GrandCompanyRank",
+        "PerformanceMode",
         // Mini-Glueckskaktor: generischer Open scrapte Auszahlungstabelle
         // ("MGP. Summe. Auszahlung…") statt Titel+Hinweis (Log 2026-09-26).
         "LotteryDaily",
+        // Spielerhandel: die Gegenstaende stehen nicht im Text (Dump 2026-10-08).
+        // OnTradeUpdate liest InventoryManager. Der generische Scanner sagte
+        // sonst nur Titel, Knoepfe und "Ok".
+        "Trade",
     ];
 
     // Addons, bei denen Universal-Update/ReceiveEvent nicht l�uft
     private static readonly HashSet<string> SpecialUpdateAddons =
     [
+        "SelectOk",
         "Talk", "TalkSubtitle", "SelectYesno",
         "_TextError", "_WideText", "_BattleTalk", "_LocationTitle",
         "LevelUpAnnouncement", "ContentsTutorial", "_ScreenText",
@@ -296,6 +315,7 @@ public sealed class UIReaderService : IDisposable
         // Rangfenster: eigener Handler (OnGrandCompanyRankUpdate). Generischer
         // Scanner + Fokus auf „Schließen“ deckten Inhalt zu (Dump 2026-09-20).
         "GrandCompanyRank",
+        "PerformanceMode",
         // Bestienbuch: generischer Update/Receive spamte im Wechsel „BESTIENBUCH“
         // (FindFocusedText Key=52012 = Rahmen) und nacktes „Nr. 1“ (Event-Target
         // ohne Enrich) — MouseOut→Titel, MouseOver→Kachel, ~8 ms Takt
@@ -304,6 +324,8 @@ public sealed class UIReaderService : IDisposable
         XbmNotebookService.AddonName,
         // Detail-Kind: nur „SEITE AN SEITE“; User will Namen im Raster, nicht hier.
         "XBMMonsterBookDetail",
+        // Spielerhandel: siehe SpecialSetupAddons. PostUpdate spricht das Angebot.
+        "Trade",
     ];
 
     // HUD-Anzeigen, deren Text/Fokus sich im normalen Spiel laufend aendert -
@@ -325,10 +347,6 @@ public sealed class UIReaderService : IDisposable
         // Quest windows: muted in the generic path, read by the dedicated
         // OnQuestWindowUpdate handler instead (canvas text, correct timing).
         "JournalDetail", "JournalAccept", "JournalResult",
-        // _CastBar id=7 = eigener Zauber-Countdown ("00.63"..."00.02"), feuerte
-        // jeden Frame beim Teleportieren (Log 2026-07-11 19:52). Eigene Casts
-        // spaeter sauber via LocalPlayer.IsCasting ansagen, nicht per Text-Scan.
-        "_CastBar",
         // _CharaSelectReturn traegt nur den "Beenden"-Knopf; beim Neuaufbau der
         // Lobby-Fenster (Login-Dialog auf/zu) meldete der Fokus-Leser ihn jedes
         // Mal ungefragt (Log 2026-07-13 00:58). Gezielte Navigation dorthin sagt
@@ -384,7 +402,20 @@ public sealed class UIReaderService : IDisposable
     // die CombatService bereits sinnvoll aufbereitet ansagt (HP-Schwellen,
     // Cast-Ansagen) - reine Duplikate ohne eigenen Wert.
     private static readonly HashSet<string> StatusBarSpamAddons = ["_StatusCustom0"];
-    private static readonly HashSet<string> FlyTextSpamAddons   = ["_FlyText"];
+    // _PopUpText is a separate source: the local log records this scanner
+    // speaking '+ Rampart', '+ Raptor Form' and, after the chat fix, '+ Jog'.
+    private static readonly HashSet<string> FlyTextSpamAddons = ["_FlyText", "_PopUpText"];
+
+    // Cast bars must never bypass CombatService's caster/target checks through
+    // generic UI speech. The 6.08.64 log still has CastBarEnemy saying
+    // 'Interrupted!' via OnAnyAddonUpdate, independently of the chat filters.
+    // _CastBar also carries the player's per-frame teleport countdown.
+    private static readonly HashSet<string> CastHudAddons =
+        ["_CastBar", "CastBarEnemy", "_TargetInfoCastBar"];
+
+    private bool IsSuppressedCombatHud(string name) =>
+        CastHudAddons.Contains(name)
+        || (_config.SuppressFlyTextSpam && FlyTextSpamAddons.Contains(name));
 
     /// <summary>
     /// Wie HudNoiseAddons, aber fuer per Configuration.cs abschaltbare
@@ -392,9 +423,17 @@ public sealed class UIReaderService : IDisposable
     /// SuppressFlyTextSpam).
     /// </summary>
     private bool IsSuppressedAddon(string name) =>
-        HudNoiseAddons.Contains(name)
+        name == "ArmouryBoard" // ArmouryListService owns the unified item list.
+        || HudNoiseAddons.Contains(name)
         || (_config.SuppressStatusBarSpam && StatusBarSpamAddons.Contains(name))
-        || (_config.SuppressFlyTextSpam && FlyTextSpamAddons.Contains(name));
+        || IsSuppressedCombatHud(name)
+        || IsSuppressedCharaMakeCity(name)
+        || IsSuppressedCharaSelect(name);
+
+    // The city pane changes alongside class selection and must not interrupt
+    // the selected class. Outside that step its normal reading remains available.
+    private bool IsSuppressedCharaMakeCity(string name) =>
+        name == "_CharaMakeCity" && IsAddonVisible("_CharaMakeClassSelector");
 
     // Listenlose Addons, bei denen wir per PostUpdate den Fokus tracken
     private static readonly HashSet<string> FocusTrackAddons =
@@ -432,38 +471,55 @@ public sealed class UIReaderService : IDisposable
     public DeepDungeonFloor? DeepDungeonFloor { get; set; }
 
     // Plugin.cs pr�ft dies, um Navigationstasten nur bei aktivem Men� zu verarbeiten
-    public bool HasActiveMenu
+    public unsafe bool HasActiveMenu
     {
         get
         {
-            if (_menuStack.Count > 0) return true;
-            unsafe
+            // The stack keeps older window names after some transitions. Only
+            // windows that still exist and are visible may claim navigation keys.
+            foreach (var (name, _) in _menuStack)
             {
-                var t = _gameGui.GetAddonByName("Talk");
-                if (!t.IsNull && ((AtkUnitBase*)(nint)t)->IsVisible) return true;
-                var y = _gameGui.GetAddonByName("SelectYesno");
-                if (!y.IsNull && ((AtkUnitBase*)(nint)y)->IsVisible) return true;
+                var menu = _gameGui.GetAddonByName(name);
+                if (!menu.IsNull && ((AtkUnitBase*)(nint)menu)->IsVisible) return true;
             }
+            var t = _gameGui.GetAddonByName("Talk");
+            if (!t.IsNull && ((AtkUnitBase*)(nint)t)->IsVisible) return true;
+            var y = _gameGui.GetAddonByName("SelectYesno");
+            if (!y.IsNull && ((AtkUnitBase*)(nint)y)->IsVisible) return true;
             return false;
         }
     }
 
     /// <summary>
-    /// True when any visible addon currently has UI focus
-    /// (<c>FocusedUnitsList</c>). Used to keep craft Numpad0 from stealing
-    /// Confirm while a shop, inventory, dialog or similar is open.
+    /// True when a visible interactive addon currently has UI focus.
+    /// Target HUD elements may receive focus while a player is selected, but
+    /// must not prevent Numpad0 from opening that player's context menu.
+    /// Shops, inventory and dialogs still own the game's Confirm key.
     /// </summary>
-    public unsafe bool HasFocusedAddon()
+    public unsafe string? BlockingFocusedAddonForPlayerMenu()
+        => BlockingFocusedAddon((AtkUnitManager*)RaptureAtkUnitManager.Instance());
+
+    internal static unsafe string? BlockingFocusedAddon(AtkUnitManager* mgr)
     {
-        var mgr = RaptureAtkUnitManager.Instance();
-        if (mgr == null) return false;
+        if (mgr == null) return null;
+        // FocusedUnitsList can also retain background windows. In the player's
+        // log it was [PlayGuide, AchievementInfo, ArmouryBoard], although the
+        // keyboard cursor was in ArmouryBoard. The native active addon wins.
+        var focused = mgr->FocusedAddon;
+        if (focused != null && focused->IsVisible)
+            return IsPlayerMenuHud(focused->NameString) ? null : focused->NameString;
         for (var i = 0; i < mgr->FocusedUnitsList.Count && i < 256; i++)
         {
             var a = mgr->FocusedUnitsList.Entries[i].Value;
-            if (a != null && a->IsVisible) return true;
+            if (a == null || !a->IsVisible) continue;
+            if (IsPlayerMenuHud(a->NameString)) continue;
+            return a->NameString;
         }
-        return false;
+        return null;
     }
+
+    private static bool IsPlayerMenuHud(string name) => name is
+        "_TargetInfo" or "_TargetInfoMainTarget" or "_TargetInfoBuffDebuff" or "_PartyList" or "NamePlate";
 
     /// <summary>
     /// Logs why Escape might not open System Menu: spoken menu, YesNo, focus.
@@ -494,7 +550,7 @@ public sealed class UIReaderService : IDisposable
             $"focused=[{string.Join(", ", focused)}]");
     }
 
-    public UIReaderService(IAddonLifecycle addonLifecycle, IGameGui gameGui, TolkService tolk, IPluginLog log, IObjectTable objectTable, InventoryService inventory, GearInfoService gearInfo, BestiaryService bestiary, HuntingLogService huntingLog, MessageHistoryService history, Configuration config, IDataManager data, TooltipService tooltips, CharaMakeReader charaMake, LootRollService lootRolls, ItemSlotService itemSlots, GatherLogService gatherLog)
+    public UIReaderService(IAddonLifecycle addonLifecycle, IGameGui gameGui, TolkService tolk, IPluginLog log, IObjectTable objectTable, InventoryService inventory, GearInfoService gearInfo, BestiaryService bestiary, HuntingLogService huntingLog, MessageHistoryService history, Configuration config, IDataManager data, TooltipService tooltips, CharaMakeReader charaMake, LootRollService lootRolls, ItemSlotService itemSlots, GatherLogService gatherLog, GameDescriptionService descriptions)
     {
         _lootRolls      = lootRolls;
         _itemSlots      = itemSlots;
@@ -504,6 +560,7 @@ public sealed class UIReaderService : IDisposable
         _gameGui        = gameGui;
         _tolk           = tolk;
         _log            = log;
+        _descriptions   = descriptions;
         _objectTable    = objectTable;
         _inventory      = inventory;
         _gearInfo       = gearInfo;
@@ -514,7 +571,7 @@ public sealed class UIReaderService : IDisposable
         _config         = config;
         _data           = data;
         _actionShape    = new ActionShapeService(data, log);
-        _aozNotebook    = new AozNotebookService(gameGui, data, log);
+        _aozNotebook    = new AozNotebookService(gameGui, data, log, descriptions);
         _xbmNotebook    = new XbmNotebookService(data, log);
         _gcRanks        = new GrandCompanyRankText(data, log);
         _dutySettings   = new ContentsFinderSettingText(log);
@@ -585,6 +642,11 @@ public sealed class UIReaderService : IDisposable
         // generic path via SpecialSetup/UpdateAddons.
         _addonLifecycle.RegisterListener(AddonEvent.PostUpdate, "Bank", OnBankUpdate);
 
+        // Player trade. PostUpdate, not PostSetup: the offer fills after the
+        // window opens, and a reload must read a trade that is already open.
+        _addonLifecycle.RegisterListener(AddonEvent.PostUpdate, "Trade", OnTradeUpdate);
+        _addonLifecycle.RegisterListener(AddonEvent.PreFinalize, "Trade", OnTradeClose);
+
         // -- [Tiefes Gewoelbe] Ergebnisschirm --------------------------
         // Der Schirm am Ende eines Laufs zaehlt die entdeckten Truhen nach FARBE. Er
         // wird vollstaendig ins Log geschrieben, weil der allgemeine Text-Scanner ihn
@@ -594,7 +656,9 @@ public sealed class UIReaderService : IDisposable
 
         // -- SelectYesno ------------------------------------------
         _addonLifecycle.RegisterListener(AddonEvent.PostSetup,        "SelectYesno", OnYesNoOpen);
-        _addonLifecycle.RegisterListener(AddonEvent.PostReceiveEvent, "SelectYesno", OnYesNoReceive);
+        _addonLifecycle.RegisterListener(AddonEvent.PreReceiveEvent, "SelectYesno", OnYesNoReceive);
+        _addonLifecycle.RegisterListener(AddonEvent.PostSetup, "SelectOk", OnSelectOkUpdate);
+        _addonLifecycle.RegisterListener(AddonEvent.PostUpdate, "SelectOk", OnSelectOkUpdate);
 
         // -- Dialog-Button-Fokus (SelectYesno + JournalResult) -----
         _addonLifecycle.RegisterListener(AddonEvent.PostUpdate, "SelectYesno",   OnDialogButtonProbe);
@@ -616,11 +680,6 @@ public sealed class UIReaderService : IDisposable
         // der nur "0/10, NEU" (Fortschritt ohne Rang-Namen) wiederholte.
         _addonLifecycle.RegisterListener(AddonEvent.PostUpdate, "MonsterNote", OnMonsterNoteUpdate);
 
-        // Armoury chest: the current category ("Kopf", "Waffe" ...) lives in
-        // its title text node - announce it on every tab change, because the
-        // category tabs themselves are icon-only (dump 2026-07-16: id=121
-        // Text, tabs = Base-wrapped icons without text).
-        _addonLifecycle.RegisterListener(AddonEvent.PostUpdate, "ArmouryBoard", OnArmouryBoardUpdate);
 
         // GrandCompanyExchange (Staatstaler-Shop): the 5 category tabs
         // (Waffen/Ruestung/... ) are RadioButtons without a shared title node,
@@ -801,9 +860,16 @@ public sealed class UIReaderService : IDisposable
     private unsafe void OnAnyAddonOpen(AddonEvent type, AddonArgs args)
     {
         var name = args.AddonName;
+        RecordPlayerMenuWindow(name);
         _log.Info($"[Accessibility] Addon: {name}");
         // Still logged above, so the HUD build-up stays diagnosable.
         if (InLoginQuiet) return;
+        if (name == "PerformanceMode")
+        {
+            var performance = (AtkUnitBase*)(nint)args.Addon;
+            if (performance != null && performance->IsVisible) AnnouncePerformanceMode(performance);
+            return;
+        }
         if (SpecialSetupAddons.Contains(name)) return;
         if (IsSuppressedAddon(name)) return;
 
@@ -898,6 +964,8 @@ public sealed class UIReaderService : IDisposable
             return;
         }
 
+        if (name == "ContentsInfoDetail" && TryReadSupplyPaneDetail()) return;
+
         // Generic text cache initialisieren � erm�glicht �nderungs-Erkennung in PostUpdate
         _noListCache.Add(name);
         ScanAddonTexts(name, addon, isInit: true);
@@ -950,6 +1018,15 @@ public sealed class UIReaderService : IDisposable
     private void OnAnyAddonClose(AddonEvent type, AddonArgs args)
     {
         var name = args.AddonName;
+        if (name == "SelectOk") _selectOkAnnouncement.Update(string.Empty, false, Environment.TickCount64);
+        if (name == "_CharaMakeHelp" || name == _lastCharaMakeHelpOwner)
+        {
+            _charaMakeHelp.Clear();
+            _lastCharaMakeHelpOwner = string.Empty;
+            _lastCharaMakeHelpText = string.Empty;
+        }
+        if (name == "Shop" && IsShopQuantityEditing)
+            EndShopQuantity(AccessibilityStrings.ShopQuantityChanged);
         _genericTextCache.Remove(name);
         _lastFocusByAddon.Remove(name);
         _lastDialogTexts.Remove(name);
@@ -1434,8 +1511,11 @@ public sealed class UIReaderService : IDisposable
 
     private unsafe void OnAnyAddonUpdate(AddonEvent type, AddonArgs args)
     {
+        if (IsTableReading) return;
         if (InLoginQuiet) return;
         var name = args.AddonName;
+        if (IsShopQuantityEditing && name == "Shop") return;
+        if (IsSuppressedCharaSelect(name)) return;
         // SpecialUpdateAddons �berspringen, au�er ConfigSystem und TitleDCWorldMap (die wir jetzt universell behandeln)
         if (SpecialUpdateAddons.Contains(name) && name != "ConfigSystem" && name != "TitleDCWorldMap") return;
 
@@ -1576,7 +1656,9 @@ public sealed class UIReaderService : IDisposable
 
     private unsafe void OnAnyAddonReceive(AddonEvent type, AddonArgs args)
     {
+        if (IsTableReading) return;
         var name = args.AddonName;
+        if (IsShopQuantityEditing && name == "Shop") return;
         if (SpecialUpdateAddons.Contains(name)) return;
         if (IsSuppressedAddon(name)) return;
         if (args is not AddonReceiveEventArgs recv) return;
@@ -1929,9 +2011,9 @@ public sealed class UIReaderService : IDisposable
     }
 
     /// <summary>Formats one gathering item row for speech.</summary>
-    private static unsafe string DescribeGatheringItem(AtkComponentBase* comp, string name)
+    private unsafe string DescribeGatheringItem(AtkComponentBase* comp, string name)
     {
-        var parts = new List<string> { name };
+        var parts = new List<string> { _inventory.TranslateItemLabel(name) };
 
         // "St. X" (id=21). ASSUMPTION (in-game unverified, corroborated by the
         // dump: a higher value tracks a lower gather chance) that St. = Stufe,
@@ -2092,7 +2174,7 @@ public sealed class UIReaderService : IDisposable
     /// <summary>Formats one row of the gathering journal for speech.</summary>
     private unsafe string DescribeGatheringNoteItem(AtkComponentBase* comp, string name)
     {
-        var parts = new List<string> { name };
+        var parts = new List<string> { _inventory.TranslateItemLabel(name) };
 
         // "Lv. 1" is the client's own label, passed through as read - only the
         // abbreviation is expanded, exactly like the harvest window's "St.".
@@ -2225,7 +2307,15 @@ public sealed class UIReaderService : IDisposable
     {
         var ptr = _gameGui.GetAddonByName("GatheringNote");
         var addon = ptr.IsNull ? null : (AtkUnitBase*)(nint)ptr;
-        if (addon == null || !addon->IsVisible) { _gatherEmptySpoken = false; return; }
+        if (addon == null || !addon->IsVisible)
+        {
+            _gatherEmptySpoken = false;
+            _gatherCategorySpoken = -1;
+            _gatherPaneSeen = -1;
+            return;
+        }
+
+        LogGatheringNoteCategoryChange(addon);
 
         var empty = FindTopNode(addon, GatheringNoteEmptyTextId);
         if (!IsVisibleFlag(empty)) { _gatherEmptySpoken = false; return; }
@@ -2293,38 +2383,6 @@ public sealed class UIReaderService : IDisposable
         var n = FindTopNode(addon, id);
         if (n == null || n->Type != NodeType.Text) return string.Empty;
         return AtkText.Read((AtkTextNode*)n).Trim();
-    }
-
-    // -- ArmouryBoard (Arsenalkammer) ---------------------------------
-
-    // Category title of the armoury chest ("Kopf", "Waffe" ...) as last
-    // announced, so switching tabs speaks the new category exactly once.
-    private string _lastArmouryCategory = string.Empty;
-
-    private unsafe void OnArmouryBoardUpdate(AddonEvent type, AddonArgs args)
-    {
-        var addon = (AtkUnitBase*)(nint)args.Addon;
-        if (addon == null) return;
-        if (!addon->IsVisible)
-        {
-            _lastArmouryCategory = string.Empty;
-            return;
-        }
-
-        // Title text node id=121 (dump 2026-07-16: [5] id=121 Text V "Kopf").
-        var node = addon->GetNodeById(121);
-        if (node == null || node->Type != NodeType.Text) return;
-        var category = AtkText.Read((AtkTextNode*)node).Trim();
-        if (string.IsNullOrEmpty(category) || category == _lastArmouryCategory) return;
-
-        var isSwitch = _lastArmouryCategory.Length > 0;
-        _lastArmouryCategory = category;
-        _log.Info($"[Accessibility] ArmouryBoard Kategorie: '{category}'");
-        // On open the window announcer names the window first - queue the
-        // initial category behind it instead of cutting it off; tab switches
-        // interrupt as usual.
-        if (isSwitch) _tolk.SpeakInterrupt(AccessibilityStrings.CategoryLabel(category));
-        else          _tolk.Speak(AccessibilityStrings.CategoryLabel(category));
     }
 
     // -- GrandCompanyExchange: Kategorie-Reiter -----------------------
@@ -2545,7 +2603,7 @@ public sealed class UIReaderService : IDisposable
     {
         if (!_data.GetExcelSheet<Lumina.Excel.Sheets.GrandCompany>().TryGetRow(rowId, out var row))
             return string.Empty;
-        var raw = row.Name.ExtractText();
+        var raw = RussianGameText.Name(_data, row, x => x.Name);
         if (raw.Contains('['))
             raw = raw.Replace("[a]", string.Empty).Replace("[p]", string.Empty).Replace("[t]", string.Empty);
         return TolkService.Sanitize(raw).Trim();
@@ -3061,7 +3119,8 @@ public sealed class UIReaderService : IDisposable
         if (string.IsNullOrWhiteSpace(label))
             label = AccessibilityStrings.CharacterTabFallback(tabIndex);
 
-        var spoken = AccessibilityStrings.CharacterTabHeader(label, tabIndex + 1, character->TabCount);
+        var spoken = AccessibilityStrings.CharacterTabHeader(label, tabIndex + 1, character->TabCount)
+            + ". " + AccessibilityStrings.TableHint(AccessibilityStrings.SpokenKeyLabel(_config.KeyReadTable));
         _log.Info($"[Character] Registerkarte: '{spoken}'");
         _tolk.SpeakInterrupt(spoken);
 
@@ -3182,13 +3241,16 @@ public sealed class UIReaderService : IDisposable
     {
         var addon = (AtkUnitBase*)(nint)args.Addon;
         if (addon == null) return;
+        _yesNoHoldWatch = false;
         (_ynConfirmLabel, _ynCancelLabel) = ReadYesNoLabels(addon);
-        _lastYesNoText = _ynConfirmLabel;
+        _lastYesNoText = string.Empty;
         var question = ReadYesNoQuestion(addon);
-        var buttons  = AccessibilityStrings.DialogButtons(_ynConfirmLabel, _ynCancelLabel);
+        var buttons = AccessibilityStrings.DialogButtons(_ynConfirmLabel, _ynCancelLabel);
         _log.Info($"[Accessibility] SelectYesno offen: Frage='{question}' Buttons=[{_ynConfirmLabel}|{_ynCancelLabel}]");
         _tolk.SpeakInterrupt(string.IsNullOrWhiteSpace(question) ? buttons : $"{question} {buttons}");
         _dialogOpenedAt = DateTime.UtcNow;
+        _yesNoPress = YesNoPress.None;
+        _holdConfirmActive = false;
     }
 
     /// <summary>
@@ -3218,8 +3280,18 @@ public sealed class UIReaderService : IDisposable
 
     private void OnYesNoReceive(AddonEvent type, AddonArgs args)
     {
-        if (args is AddonReceiveEventArgs recv)
-            _log.Info($"[Accessibility] SelectYesno Event: type={recv.AtkEventType} param={recv.EventParam}");
+        if (args is not AddonReceiveEventArgs recv) return;
+        _log.Info($"[Accessibility] SelectYesno Event: type={recv.AtkEventType} param={recv.EventParam}");
+        // Native Num0/controller/mouse presses need the same result check as Enter.
+        if ((int)recv.AtkEventType == (int)AtkEventType.ButtonClick && recv.EventParam is 0 or 1 or 2)
+        {
+            unsafe
+            {
+                var addon = (AtkUnitBase*)(nint)args.Addon;
+                if (addon == null || !addon->IsVisible) return;
+                RecordYesNoPress(addon, (int)recv.EventParam);
+            }
+        }
     }
 
     // -- Struktur-Probe für ein einzelnes Addon ------------------------
@@ -3293,6 +3365,7 @@ public sealed class UIReaderService : IDisposable
     // dwelled on the SAME skill for ActionDescDwellSeconds (user choice
     // 2026-07-31), so quickly scanning the list never drowns in descriptions.
     private uint _actionDwellId;          // action id the dwell clock is timing (0 = none)
+    private DetailKind _actionDwellKind;  // identical ids in different sheets are different entries
     private long _actionDwellTick;        // Stopwatch timestamp the focus reached it
     private bool _actionDwellDescSpoken;  // description already queued for this dwell?
     private const double ActionDescDwellSeconds = 0.4;
@@ -3333,26 +3406,19 @@ public sealed class UIReaderService : IDisposable
     // instant the focus lands; the tooltip DESCRIPTION is only queued after the
     // focus has dwelled on the SAME item for the same interval (user choice
     // 2026-07-31, mirrors the skill window) - so quickly scanning the bag never
-    // drowns in descriptions. Keyed by Item sheet row, not node pointer, so
-    // moving between two stacks of the same item does not re-read the text.
-    // The focus reader waits for AgentItemDetail to catch up with the cursor
-    // rather than announcing the slot it just left - see ResolveFocusedItemName.
-    // Counted per node, so a slot the agent never claims cannot stall forever.
+    // drowns in descriptions. RefreshItemFocus resets this state when the slot,
+    // contents or page changes, even if the game reuses the same node pointer.
+    // Owned inventory/armoury slots use the native display sort map; other
+    // windows allow AgentItemDetail a short, bounded catch-up interval.
     private nint _itemDeferNode;
     private int  _itemDeferFrames;
     private int  _itemDeferBudget = ItemDeferMaxFrames;
     private bool _itemSlotDeferring;    // set while this frame must not announce yet
     private uint _lastSpokenSlotItemId; // item the PREVIOUS focus announced
     private const int ItemDeferMaxFrames = 4;
-    // Waiting for the detail window to OPEN is a different order of magnitude from
-    // waiting for it to catch up. Measured 2026-09-05 00:19: opening the bag, the
-    // first focused slot still had no agent after four frames and fell back to the
-    // icon - the one miss in 101 focus changes. Half a second covers it, costs
-    // nothing when the agent is already there, and is spent while the window is
-    // announcing "Inventory" and its tab anyway. It can only ever be spent in the
-    // three windows the agent provably serves; everywhere else SlotWait.None means
-    // no wait at all.
-    private const int ItemDeferOpeningFrames = 30;
+    // Do not spend half a second waiting for a keyboard tooltip that may never
+    // open. This budget only applies to the remaining agent-based windows.
+    private const int ItemDeferOpeningFrames = 4;
 
     private uint _itemDwellId;            // item id the dwell clock is timing (0 = none)
     private long _itemDwellTick;          // Stopwatch timestamp the focus reached it
@@ -3391,6 +3457,7 @@ public sealed class UIReaderService : IDisposable
 
     public unsafe void UpdateGlobalFocus(bool navKeyHeld = false)
     {
+        if (IsShopQuantityEditing || IsTableReading) return;
         // While the HUD builds after login the game moves focus across freshly
         // created windows on its own; reading that is noise, not navigation.
         if (InLoginQuiet) return;
@@ -3403,10 +3470,33 @@ public sealed class UIReaderService : IDisposable
         if (input == null) return;
 
         var node = input->FocusedNode;
+        RefreshItemFocus(node);
+        if (_retryItemFocusSpeech && !_tolk.IsFocusInterruptProtected)
+        {
+            _retryItemFocusSpeech = false;
+            _lastFocusedNodePtr = 0;
+        }
         if (node == null)
         {
             _lastFocusedNodePtr  = 0;
             _lastFocusedNodeText   = string.Empty;
+            _lastFocusedNodeStable = string.Empty;
+            _lastFocusedItemName = string.Empty;
+            return;
+        }
+
+        // This reader runs independently of addon setup/update/event handlers.
+        // Apply the same combat-HUD rule before resolving text or tooltips, so
+        // moving focus onto a cast bar cannot reintroduce the announcements.
+        // Do not use the whole HudNoiseAddons set: it also contains quest and
+        // character windows whose deliberate keyboard focus is read here.
+        if (FindAddonNameForNode(node) == "ArmouryBoard"
+            || IsSuppressedCombatHud(FindAddonNameForNode(node))
+            || IsSuppressedCharaMakeCity(FindAddonNameForNode(node))
+            || IsSuppressedCharaSelect(FindAddonNameForNode(node)))
+        {
+            _lastFocusedNodePtr = 0;
+            _lastFocusedNodeText = string.Empty;
             _lastFocusedNodeStable = string.Empty;
             _lastFocusedItemName = string.Empty;
             return;
@@ -3417,7 +3507,7 @@ public sealed class UIReaderService : IDisposable
         // ohne Rang-Namen - unbrauchbar. Solange das Fenster offen ist, schweigt
         // der generische Leser fuer diese Zeilen (State wird zurueckgesetzt, damit
         // nach dem Schliessen wieder frisch angesagt wird).
-        if (IsAddonVisible("MonsterNote"))
+        if (FindAddonNameForNode(node) == "MonsterNote")
         {
             _lastFocusedNodePtr  = 0;
             _lastFocusedNodeText   = string.Empty;
@@ -3526,7 +3616,19 @@ public sealed class UIReaderService : IDisposable
         // on a duty-finder setting, so leaving that window ends the help dwell by
         // itself instead of leaving a stale control behind.
         _settingHelpOwner = 0;
-        if (TryReadContentsFinderSettingRow(node, out var dutySetting))
+        if (TryReadArmouryFilterFocus(node, out var armouryFilter))
+        {
+            text = armouryFilter;
+        }
+        else if (TryReadCharacterStat(node, out var statText))
+        {
+            text = statText;
+        }
+        else if (TryReadShopQuantityFocus(node, out var quantityText))
+        {
+            text = quantityText;
+        }
+        else if (TryReadContentsFinderSettingRow(node, out var dutySetting))
         {
             // Einstellungen der Inhaltssuche: Name UND Zustand ("Keine
             // Beschraenkungen, Schalter, aus"). Vor dem allgemeinen Pfad, der
@@ -3758,6 +3860,8 @@ public sealed class UIReaderService : IDisposable
 
             if (string.IsNullOrEmpty(text) && TryReadIconRowPosition(node, out var iconRow))
                 text = iconRow;
+            if (string.IsNullOrEmpty(text))
+                text = ReadUnlabelledInspectSlot(node);
         }
 
         // [Tiefes Gewoelbe] Das Fenster "Charakterinfo": seine Gegenstands-, Magizit- und
@@ -3802,6 +3906,9 @@ public sealed class UIReaderService : IDisposable
         // The time itself is still SPOKEN - it is real information on a timed leve,
         // and it is in the line the first time the focus lands there. Only its
         // ticking no longer counts as a new item.
+        var focusedButton = FindFocusedButton();
+        if (focusedButton != null && text.Length > 0 && !NativeDialogButtons.Available(focusedButton))
+            text = AccessibilityStrings.DisabledButton(text);
         var stable = StripLiveClocks(text);
         if ((nint)node == _lastFocusedNodePtr && stable == _lastFocusedNodeStable) return;
         _lastFocusedNodePtr    = (nint)node;
@@ -3861,6 +3968,7 @@ public sealed class UIReaderService : IDisposable
 
         if (!string.IsNullOrEmpty(text))
         {
+            text = GatheringContextPrefix(node, text);
             // The quest-completion reward summary is spoken in full when
             // JournalResult opens (BuildRewardText). Its currency cells carry
             // only bare numbers ("400"/"103"); buttons ("Abschließen") and item
@@ -3905,7 +4013,7 @@ public sealed class UIReaderService : IDisposable
             // an edge flag, so it stays true for the whole time a key is held.
             if (!string.IsNullOrEmpty(_lastFocusedItemName)
                 && IsAddonVisible("JournalResult")
-                && FindAddonNameForNode(node) != "JournalRewardItem"
+                && FindAddonNameForNode(node) == "JournalResult"
                 && !navKeyHeld) return;
             // JournalAccept: game auto-focuses Annehmen/Ablehnen on open. Speaking
             // them interrupts the quest summary (log 2026-09-23/24). Only announce
@@ -3939,6 +4047,8 @@ public sealed class UIReaderService : IDisposable
             // faltet er Anzahl, aktuellen Wert und Position in DIESELBE Ansage, statt
             // eine zweite hinterherzuschicken, die die erste abschneiden wuerde.
             text = _charaMake.DescribeFocus(node, text);
+            if (FindAddonNameForNode(node) is "LotteryDaily" or "LotteryWeekly" or "LotteryWeeklyInput")
+                text = RussianLotteryText.Translate(_data, text);
             // Namenstag: der globale Fokus landet auf dem Radio mit nacktem "01".
             // Die lesbare Zeile ist Text id=37; ohne Ersetzung hoert man nur die Zahl
             // (User 2026-09-19: beim Oeffnen nur "01"). Ok/Zurueck bleiben unveraendert.
@@ -3961,10 +4071,12 @@ public sealed class UIReaderService : IDisposable
             // Item-Slot-Texte tragen die Gear-Info schon (ResolveFocusedItemName);
             // rohe Fokus-Texte (Laden-Zeilen) bekommen sie hier angehaengt.
             if (string.IsNullOrEmpty(_lastFocusedItemName)) text = AppendShopGearInfo(text);
+            text = AppendShopQuantityHint(node, text);
             // The name is going out now, so the description dwell may follow it.
             // A shop row counts as well: its name comes from the row text, not
             // from an icon slot, but it is just as much an item name.
-            _itemDwellArmed = itemBranchActive || _shopRowItemActive;
+            _itemDwellArmed = (itemBranchActive || _shopRowItemActive) && !_tolk.IsFocusInterruptProtected;
+            _retryItemFocusSpeech = (itemBranchActive || _shopRowItemActive) && _tolk.IsFocusInterruptProtected;
             // Der Knoten geht als Quelle mit: identische Doppel-Ansagen DESSELBEN
             // Knotens faengt der 0,5s-Debounce weiterhin ab, ein Schritt auf einen
             // ANDEREN Knoten mit gleichem Wort ("Einfach" -> "Einfach" in der
@@ -4718,20 +4830,34 @@ public sealed class UIReaderService : IDisposable
         }
         if (!shopOpen) return text;
 
-        foreach (var part in text.Split(", "))
+        var parts = text.Split(", ");
+        var info = string.Empty;
+        for (var i = 0; i < parts.Length; i++)
         {
             // Shop rows wrap the item name in SeString payload bytes
             // (0x02..0x03, log 2026-07-16 18:21: '226, <payload>Laien-
             // Hanfbundhaube<payload>') - match on the sanitized name, the
             // same form the user hears.
-            var info = _gearInfo.DescribeByName(TolkService.Sanitize(part));
-            if (info.Length > 0)
+            var sourceName = TolkService.Sanitize(parts[i]);
+            var itemId = _inventory.ResolveItemIdByName(sourceName);
+            if (itemId != 0)
             {
-                _log.Info($"[Gear] Laden-Zeile '{part}': {info}");
-                return $"{text}, {info}";
+                parts[i] = _inventory.ResolveItemLabel(itemId);
+                if (info.Length == 0)
+                {
+                    // Category first. For armour that is the slot ("Kopf"),
+                    // which the row text does not say.
+                    var basics = _gearInfo.DescribeItemBasics(itemId);
+                    var gear = _gearInfo.DescribeGear(itemId);
+                    info = basics.Length == 0 ? gear
+                        : gear.Length == 0 ? basics
+                        : $"{basics}, {gear}";
+                }
             }
+            else parts[i] = _gearInfo.TranslateClassLabel(parts[i]);
         }
-        return text;
+        text = string.Join(", ", parts);
+        return info.Length > 0 ? $"{text}, {info}" : text;
     }
 
     /// <summary>
@@ -4760,8 +4886,40 @@ public sealed class UIReaderService : IDisposable
                 var comp = ((AtkComponentNode*)cur)->Component;
                 if (comp == null) return string.Empty;
 
+                // Character window: the slot's own name comes first ("Kopf, ..."),
+                // and an empty slot says so instead of falling silent. Its icon
+                // is a silhouette (uint.MaxValue), which the empty check below
+                // never matched. See CharacterEquipSlot.
+                var isCharacterSlot = CharacterEquipSlot.TryDescribe(cur, FindAddonNameForNode(cur), _data, _log,
+                    out var characterSlotName, out var characterEmpty, out var characterWear);
+                if (isCharacterSlot && characterEmpty.Length > 0)
+                {
+                    _log.Info($"[CharSlot] '{characterSlotName}' leer");
+                    return $"{characterSlotName}, {characterEmpty}";
+                }
+
                 var icon = FindSlotIcon(comp);
                 if (icon == null) return string.Empty; // a real control, but not an item slot
+
+                // Owned slots are resolved through the client's display sort map.
+                // No tooltip-opening delay or ambiguous reverse icon lookup.
+                var owned = _focusedOwnedSlot;
+                if (owned.Status == ItemSlotService.OwnedSlotStatus.Updating)
+                {
+                    if ((nint)node != _itemDeferNode)
+                    {
+                        _itemDeferNode = (nint)node;
+                        _itemDeferFrames = 0;
+                    }
+                    if (_itemDeferFrames++ < ItemDeferMaxFrames)
+                    {
+                        _itemSlotDeferring = true;
+                        return string.Empty;
+                    }
+                    return AccessibilityStrings.FocusedItemUnavailable;
+                }
+                if (owned.Status == ItemSlotService.OwnedSlotStatus.Ready && owned.ItemId == 0)
+                    return AccessibilityStrings.EmptySlot;
 
                 // Empty slots must SPEAK (user 2026-07-16: silent cursor moves
                 // in the bag/armoury are indistinguishable from a stuck cursor).
@@ -4800,12 +4958,14 @@ public sealed class UIReaderService : IDisposable
                     _itemDeferBudget = ItemDeferMaxFrames;
                 }
                 var deferExhausted = _itemDeferFrames >= _itemDeferBudget;
-                var agentItemId    = _itemSlots.TryResolve(comp, icon->IconId, _lastSpokenSlotItemId,
-                                                           deferExhausted, out var agentWait);
+                var agentWait = SlotWait.None;
+                var agentItemId = owned.Status == ItemSlotService.OwnedSlotStatus.Ready
+                    ? owned.ItemId : _itemSlots.TryResolve(comp, icon->IconId, _lastSpokenSlotItemId,
+                                                           deferExhausted, out agentWait);
                 if (agentItemId == 0 && agentWait != SlotWait.None && !deferExhausted)
                 {
-                    // A window that has not opened its detail yet needs the long
-                    // budget; one that is merely a frame behind needs the short one.
+                    // Both an unopened detail and a stale detail have a short
+                    // bounded wait; owned slots never depend on either.
                     if (agentWait == SlotWait.AgentOpening) _itemDeferBudget = ItemDeferOpeningFrames;
                     _itemDeferFrames++;
                     _itemSlotDeferring = true;
@@ -4817,13 +4977,13 @@ public sealed class UIReaderService : IDisposable
                 if (agentItemId != 0)
                 {
                     itemId = agentItemId;
-                    name   = _inventory.ResolveItemName(itemId);
+                    name   = _inventory.ResolveItemLabel(itemId);
                 }
                 else
                 {
                     (name, itemId) = _inventory.ResolveIconItem(icon->IconId);
                 }
-                if (string.IsNullOrEmpty(name)) return string.Empty;
+                if (string.IsNullOrEmpty(name)) return isCharacterSlot ? characterSlotName : string.Empty;
                 _lastFocusedItemId = itemId; // remembered for the description dwell
                 // Survives the deferral frames, unlike _lastFocusedItemId, which is
                 // cleared at the top of every call: a stale agent is recognised by
@@ -4834,7 +4994,9 @@ public sealed class UIReaderService : IDisposable
                 // Category and item level for EVERY item ("Baustein,
                 // Gegenstandsstufe 1") - the tooltip lines a sighted player
                 // reads while the cursor sits on the slot.
-                var basics = _gearInfo.DescribeItemBasics(itemId);
+                // Not in the Character window: there the slot name already says
+                // the category, and "Kopf, Leinenturban, Kopf" would say it twice.
+                var basics = isCharacterSlot ? string.Empty : _gearInfo.DescribeItemBasics(itemId);
 
                 // Equipment gets level + wearability appended ("Bronzegladius,
                 // Stufe 5, tragbar") - the info a blind player needs when
@@ -4851,30 +5013,36 @@ public sealed class UIReaderService : IDisposable
                 // Prepend the stack count so the user hears "10 mal Eichenholz".
                 var qty = ReadIconQuantity(icon);
 
-                // Durability - the one line of the tooltip that cannot be worked
-                // out from anything else on the slot (user 2026-09-12, armoury
-                // chest). The game's own tooltip text comes first; where the game
-                // does not open that window (measured 2026-09-05: it opens on
-                // hover only, never on keyboard focus), the single owned copy of
-                // the item answers instead - and stays silent when there are
-                // several, because the item id cannot say which copy the cursor
-                // is on. Both sources read the game's value; neither recomputes it.
+                // Condition and spiritbond come from the item instance, never from
+                // the tooltip text, which trails the cursor. See ItemWearText.
+                // The worn slot, the sort-mapped owned slot, then the hover hook,
+                // then the single owned copy. Several copies and no resolved
+                // instance stay silent: the item id cannot say which copy it is.
                 var condition       = string.Empty;
                 var conditionSource = "-";
-                if (agentItemId != 0)
+                if (isCharacterSlot)
                 {
-                    condition       = ReadTooltipCondition();
-                    conditionSource = "tooltip";
-                    if (condition.Length == 0)
+                    condition       = characterWear;
+                    conditionSource = "worn";
+                }
+                else if (agentItemId != 0)
+                {
+                    var instance = ItemSlotService.InstanceAt(owned);
+                    conditionSource = instance != null ? "owned" : "hover";
+                    if (instance == null)
+                        instance = _itemSlots.TryGetHoveredInstance(itemId);
+                    if (instance == null)
                     {
-                        condition = _inventory.DescribeOwnedCondition(
+                        instance = _inventory.FindSingleOwnedInstance(
                             itemId, ItemSlotService.IsHighQuality(icon->IconId));
-                        conditionSource = condition.Length > 0 ? "inventory" : "none";
+                        conditionSource = instance != null ? "inventory" : "none";
                     }
+                    condition = ItemWearText.Describe(instance, _data, _log);
                 }
 
                 _log.Info($"[Focus] Item-Slot iconId={icon->IconId} qty='{qty}' name='{name}' basics='{basics}' gear='{gear}' klassen='{owners}' set={set.Length > 0} cond='{condition}' via={conditionSource}");
                 var spoken = qty.Length > 0 ? AccessibilityStrings.ItemQuantity(qty, name) : name;
+                if (isCharacterSlot) spoken = $"{characterSlotName}, {spoken}";
                 // HQ, which a sighted player reads off the symbol drawn on the slot.
                 // Without it the two Honey stacks in the bag were the SAME sentence
                 // apart from the count (user 2026-09-05, log 00:11: "Honey, Ingredient,
@@ -5261,6 +5429,7 @@ public sealed class UIReaderService : IDisposable
                         return false;
                 }
 
+                label = RussianLotteryText.Translate(_data, label);
                 if (label.Length == 1 && char.IsDigit(label[0]))
                 {
                     var slot = LotteryWeeklyActiveSlot(addon);
@@ -5428,11 +5597,11 @@ public sealed class UIReaderService : IDisposable
         _log.Info($"[LotteryDaily] Open: {spoken}");
     }
 
-    private static unsafe string ReadLotteryDailyTopText(AtkUnitBase* addon, uint nodeId)
+    private unsafe string ReadLotteryDailyTopText(AtkUnitBase* addon, uint nodeId)
     {
         var n = FindTopLevelNode(addon, nodeId);
         if (n == null || n->Type != NodeType.Text || !n->IsVisible()) return string.Empty;
-        return AtkText.ReadClean((AtkTextNode*)n).Trim();
+        return RussianLotteryText.Translate(_data, AtkText.ReadClean((AtkTextNode*)n).Trim());
     }
 
     /// <summary>
@@ -5541,7 +5710,7 @@ public sealed class UIReaderService : IDisposable
                     if (tip.Length == 0) return false;
                     label = tip;
                 }
-                text = label;
+                text = RussianLotteryText.Translate(_data, label);
                 if (((ushort)compNode->NodeFlags & (ushort)NodeFlags.Enabled) == 0)
                     text = AccessibilityStrings.ControlUnavailable(text);
                 return true;
@@ -6557,7 +6726,7 @@ public sealed class UIReaderService : IDisposable
     {
         // BuddySkill/BuddyAction use Text tooltips (no Action binding) — see
         // HandleBuddySkillDwell. Only the real skill window uses Action ids here.
-        var inActionMenu = IsAddonVisible("ActionMenu") && FocusIsActionSlot(node);
+        var inActionMenu = IsActionMenuEntry(node);
         if (!inActionMenu)
         {
             _actionDwellId = 0;
@@ -6573,11 +6742,12 @@ public sealed class UIReaderService : IDisposable
             _actionDetailDwellKey = string.Empty;
             var id = action.Value.Id;
 
-            if (id != _actionDwellId)
+            if (id != _actionDwellId || action.Value.Kind != _actionDwellKind)
             {
                 // Focus just reached this skill (its name is being spoken this same
                 // frame) - start the clock, description not yet due.
                 _actionDwellId         = id;
+                _actionDwellKind       = action.Value.Kind;
                 _actionDwellTick       = System.Diagnostics.Stopwatch.GetTimestamp();
                 _actionDwellDescSpoken = false;
                 return;
@@ -6590,44 +6760,32 @@ public sealed class UIReaderService : IDisposable
 
             _actionDwellDescSpoken = true; // one-shot per dwell, even if desc is empty
             var desc = ActionMenuDescription(action.Value.Kind, id);
-            // Traits have no ActionTransient text — take the panel description
-            // the scanner used to spam (Log 2026-09-14, muted in HudNoiseAddons).
-            if (string.IsNullOrEmpty(desc) && TryReadActionDetailPanel(out _, out _, out var panelDesc))
+            // Keep the visible panel as the fallback for unresolved descriptions.
+            if (string.IsNullOrEmpty(desc) && TryReadActionDetailPanel(out var panelName, out _, out var panelDesc)
+                && ActionMenuText.Matches(panelName, GetActionMenuSlotLabel(node)))
                 desc = panelDesc;
             if (!string.IsNullOrEmpty(desc)) _tolk.Speak(desc);
             return;
         }
 
-        // Unbound traits: dwell on the ActionDetail panel name/description.
+        // Unbound rows use their own label, even when keyboard focus does not
+        // open ActionDetail. Pointer + label distinguish recycled renderers.
         _actionDwellId = 0;
-        if (!TryReadActionDetailPanel(out var panelName, out _, out var unboundDesc)
-            || string.IsNullOrWhiteSpace(panelName))
+        var key = ((nint)node).ToString() + ":" + GetActionMenuSlotLabel(node);
+        if (key != _actionDetailDwellKey)
         {
-            _actionDetailDwellKey = string.Empty;
-            return;
-        }
-
-        if (!ActionDetailNamesMatch(panelName, GetActionMenuSlotLabel(node)))
-        {
-            _actionDetailDwellKey = string.Empty;
-            return;
-        }
-
-        if (panelName != _actionDetailDwellKey)
-        {
-            _actionDetailDwellKey  = panelName;
-            _actionDwellTick       = System.Diagnostics.Stopwatch.GetTimestamp();
+            _actionDetailDwellKey = key;
+            _actionDwellTick = System.Diagnostics.Stopwatch.GetTimestamp();
             _actionDwellDescSpoken = false;
             return;
         }
-
         if (_actionDwellDescSpoken) return;
         var elapsedU = (double)(System.Diagnostics.Stopwatch.GetTimestamp() - _actionDwellTick)
-                       / System.Diagnostics.Stopwatch.Frequency;
+            / System.Diagnostics.Stopwatch.Frequency;
         if (elapsedU < ActionDescDwellSeconds) return;
-
         _actionDwellDescSpoken = true;
-        if (!string.IsNullOrEmpty(unboundDesc)) _tolk.Speak(unboundDesc);
+        var entry = ReadUnboundAction(node);
+        if (!string.IsNullOrWhiteSpace(entry.Description)) _tolk.Speak(FlattenDescription(entry.Description));
     }
 
     // Mitstreiter Kunststücke: Text-Tooltip name → BuddyAction sheet description.
@@ -6724,7 +6882,7 @@ public sealed class UIReaderService : IDisposable
             var name = row.Name.ExtractText().Trim();
             if (!string.Equals(name, needle, StringComparison.OrdinalIgnoreCase))
                 continue;
-            return FlattenDescription(row.Description.ExtractText());
+            return FlattenDescription(_descriptions.BuddyAction(row.RowId));
         }
 
         // Fallback: Action sheet by name → ActionTransient (same wording as skill window).
@@ -6736,7 +6894,7 @@ public sealed class UIReaderService : IDisposable
             if (!string.Equals(name, needle, StringComparison.OrdinalIgnoreCase))
                 continue;
             if (_data.GetExcelSheet<LuminaActionTransient>()?.TryGetRow(row.RowId, out var trans) == true)
-                return FlattenDescription(trans.Description.ExtractText());
+                return FlattenDescription(_descriptions.Action(row.RowId));
             return string.Empty;
         }
         return string.Empty;
@@ -6869,9 +7027,7 @@ public sealed class UIReaderService : IDisposable
     {
         text = string.Empty;
         defer = false;
-        if (!IsAddonVisible("ActionMenu")) return false;
-
-        if (!FocusIsActionSlot(node)) return false;
+        if (!IsActionMenuEntry(node)) return false;
 
         // Source the action from the tooltip binding the game creates for the
         // slot, NOT from AgentActionDetail: the agent stays at ActionId 0 under
@@ -6900,42 +7056,23 @@ public sealed class UIReaderService : IDisposable
             return true;
         }
 
-        // Traits without an Action tooltip: Name+Stufe from the ActionDetail
-        // panel (nodes id=5 / id=26, Log 2026-09-14). Wait until the panel
-        // matches this row so we do not attach the previous trait's level.
         var slotLabel = GetActionMenuSlotLabel(node);
-        if (TryReadActionDetailPanel(out var panelName, out var panelLevel, out _)
-            && !string.IsNullOrWhiteSpace(panelName)
-            && (string.IsNullOrWhiteSpace(slotLabel) || ActionDetailNamesMatch(panelName, slotLabel)))
+        if (!string.IsNullOrWhiteSpace(slotLabel))
         {
             _actionDetailDeferNode = 0;
             _actionDetailDeferFrames = 0;
-            text = panelLevel > 0
-                ? AccessibilityStrings.NameWithLevel(panelName, panelLevel)
-                : panelName;
-            _log.Info($"[ActionDetail] Panel-Fallback node id={node->NodeId} -> '{text}'");
+            var entry = ReadUnboundAction(node);
+            var level = ActionMenuText.ParseLabel(slotLabel).Level;
+            text = level > 0 ? AccessibilityStrings.NameWithLevel(entry.Name, level) : entry.Name;
             return true;
         }
-
         if ((nint)node != _actionDetailDeferNode)
         {
-            _actionDetailDeferNode   = (nint)node;
+            _actionDetailDeferNode = (nint)node;
             _actionDetailDeferFrames = 0;
         }
-
-        if (_actionDetailDeferFrames < ActionDetailDeferMaxFrames)
-        {
-            _actionDetailDeferFrames++;
-            defer = true;
-            return true;
-        }
-
-        // Panel never matched — speak the row label alone rather than stay silent.
-        _actionDetailDeferNode = 0;
-        _actionDetailDeferFrames = 0;
-        if (string.IsNullOrWhiteSpace(slotLabel)) return false;
-        text = slotLabel;
-        return true;
+        if (_actionDetailDeferFrames++ < ActionDetailDeferMaxFrames) { defer = true; return true; }
+        return false;
     }
 
     /// <summary>
@@ -7114,16 +7251,6 @@ public sealed class UIReaderService : IDisposable
         return FlattenDescription(text);
     }
 
-    private static bool ActionDetailNamesMatch(string panelName, string slotLabel)
-    {
-        if (string.IsNullOrWhiteSpace(panelName) || string.IsNullOrWhiteSpace(slotLabel))
-            return false;
-        var a = FlattenDescription(panelName);
-        var b = FlattenDescription(slotLabel);
-        return a.Equals(b, StringComparison.OrdinalIgnoreCase)
-               || a.Contains(b, StringComparison.OrdinalIgnoreCase)
-               || b.Contains(a, StringComparison.OrdinalIgnoreCase);
-    }
 
     /// <summary>
     /// Action tooltip on a child of the focused slot component (traits often
@@ -7131,21 +7258,29 @@ public sealed class UIReaderService : IDisposable
     /// </summary>
     private unsafe TooltipService.ActionRef? TryFindActionBindingNear(AtkResNode* node)
     {
-        var cur = node;
-        for (var up = 0; up < 4 && cur != null; up++, cur = cur->ParentNode)
+        // Stop at this slot's first component. Climbing into a shared list and
+        // taking its first tooltip can describe a neighbour instead of the focus.
+        for (var up = 0; node != null && up < 6; up++, node = node->ParentNode)
         {
-            if ((int)cur->Type < 1000) continue;
-            var comp = ((AtkComponentNode*)cur)->Component;
-            if (comp == null) continue;
-            for (var j = 0; j < comp->UldManager.NodeListCount; j++)
-            {
-                var child = comp->UldManager.NodeList[j];
-                if (child == null) continue;
-                var a = _tooltips.TryGetActionDeep(child, maxDepth: 2);
-                if (a != null) return a;
-            }
+            if ((int)node->Type < 1000) continue;
+            var bindings = new HashSet<TooltipService.ActionRef>();
+            CollectActionBindings(node, bindings, new HashSet<nint>(), 0);
+            return bindings.Count == 1 ? bindings.First() : null;
         }
         return null;
+    }
+
+    private unsafe void CollectActionBindings(AtkResNode* node, HashSet<TooltipService.ActionRef> bindings,
+        HashSet<nint> visited, int depth)
+    {
+        if (node == null || depth > 6 || visited.Count >= 256 || !visited.Add((nint)node)) return;
+        var binding = _tooltips.TryGetActionDeep(node, 0);
+        if (binding is { } action) bindings.Add(action);
+        if ((int)node->Type < 1000) return;
+        var component = ((AtkComponentNode*)node)->Component;
+        if (component == null) return;
+        for (var i = 0; i < component->UldManager.NodeListCount; i++)
+            CollectActionBindings(component->UldManager.NodeList[i], bindings, visited, depth + 1);
     }
 
     /// <summary>
@@ -7167,7 +7302,7 @@ public sealed class UIReaderService : IDisposable
 
         var label = ResolveBuddyIconLabel(node);
         if (string.IsNullOrWhiteSpace(label)) return false;
-        text = label;
+        text = BuddySkillBranchContext(node, label);
         return true;
     }
 
@@ -7202,7 +7337,7 @@ public sealed class UIReaderService : IDisposable
                 _lastBuddySkillLogged = tip;
                 _log.Info($"[Buddy] Skill via Text-Tooltip: '{tip}'");
             }
-            return tip;
+            return _descriptions.BuddyActionNameFromPanel(tip);
         }
 
         return string.Empty;
@@ -7216,14 +7351,15 @@ public sealed class UIReaderService : IDisposable
     private static unsafe bool FocusIsActionSlot(AtkResNode* node)
     {
         var cur = node;
-        for (var up = 0; up < 3 && cur != null; up++)
+        for (var up = 0; up < 6 && cur != null; up++)
         {
             if ((int)cur->Type >= 1000)
             {
                 var comp = ((AtkComponentNode*)cur)->Component;
                 if (comp == null) return false;
                 var ct = comp->GetComponentType();
-                return ct is ComponentType.DragDrop or ComponentType.Icon;
+                if (ct is ComponentType.DragDrop or ComponentType.Icon) return true;
+                if (ct is ComponentType.Button or ComponentType.RadioButton or ComponentType.CheckBox) return false;
             }
             cur = cur->ParentNode;
         }
@@ -7235,9 +7371,10 @@ public sealed class UIReaderService : IDisposable
     /// tooltip's name+level).</summary>
     private string DescribeActionDetail(DetailKind kind, uint id) => kind switch
     {
-        DetailKind.Action or DetailKind.CraftingAction => DescribeAction(id),
+        DetailKind.Action                              => DescribeAction(id),
+        DetailKind.CraftingAction                      => DescribeCraftAction(id),
         DetailKind.Trait                               => DescribeTrait(id),
-        _                                              => string.Empty,
+        _ => _descriptions.MenuName(kind, id),
     };
 
     /// <summary>"Name, Stufe X" for an action - the short line spoken the instant
@@ -7247,7 +7384,7 @@ public sealed class UIReaderService : IDisposable
     private string DescribeAction(uint id)
     {
         if (!_data.GetExcelSheet<LuminaAction>().TryGetRow(id, out var row)) return string.Empty;
-        var name = row.Name.ExtractText().Trim();
+        var name = _descriptions.ActionName(id).Trim();
         if (string.IsNullOrWhiteSpace(name)) return string.Empty;
 
         var sb = new StringBuilder(name);
@@ -7262,21 +7399,22 @@ public sealed class UIReaderService : IDisposable
         return sb.ToString();
     }
 
-    /// <summary>The flattened tooltip description of an action, or empty for kinds
-    /// that carry none (traits, unresolved ids). Spoken separately, and only after
+    /// <summary>The flattened tooltip description from the entry's own sheet.
+    /// Spoken separately, and only after
     /// the focus dwells - see HandleActionMenuDwell.</summary>
     private string ActionMenuDescription(DetailKind kind, uint id)
+        => FlattenDescription(_descriptions.MenuDescription(kind, id));
+
+    private string DescribeCraftAction(uint id)
     {
-        if (kind is not (DetailKind.Action or DetailKind.CraftingAction)) return string.Empty;
-        if (!_data.GetExcelSheet<LuminaActionTransient>().TryGetRow(id, out var trans)) return string.Empty;
-        return FlattenDescription(trans.Description.ExtractText());
+        return _descriptions.CraftActionName(id).Trim();
     }
 
     /// <summary>"Name, Stufe X" for a trait (the Trait sheet has no description).</summary>
     private string DescribeTrait(uint id)
     {
         if (!_data.GetExcelSheet<LuminaTrait>().TryGetRow(id, out var row)) return string.Empty;
-        var name = row.Name.ExtractText().Trim();
+        var name = _descriptions.TraitName(id).Trim();
         if (string.IsNullOrWhiteSpace(name)) return string.Empty;
         return row.Level > 0 ? AccessibilityStrings.NameWithLevel(name, row.Level) : name;
     }
@@ -7546,6 +7684,7 @@ public sealed class UIReaderService : IDisposable
     {
         var addon = (AtkUnitBase*)(nint)args.Addon;
         if (addon == null) return;
+        ResetConfigGlobalFocus();
 
         _csPendingSave       = true;  // Default: OK = gespeichert; Escape setzt auf false
         _activeScreenContext = ScreenContext.ConfigSystem;
@@ -7607,6 +7746,7 @@ public sealed class UIReaderService : IDisposable
 
     private void OnConfigSystemClose(AddonEvent type, AddonArgs args)
     {
+        ResetConfigGlobalFocus();
         _focusTrackFlags.Remove("ConfigSystem");
         _csTabs.Clear();
         _csLastTabIndex = -1;
@@ -7816,6 +7956,7 @@ public sealed class UIReaderService : IDisposable
             _configSystemLastTexts.Clear();
             _csOptionFlags.Clear();
             _csTextChanges.Clear();
+            ResetConfigGlobalFocus();
             // _csLiveTexts NICHT leeren: die Bildfrequenz-Anzeige laeuft auf
             // allen Seiten mit, einmal ueberfuehrt bleibt sie stumm.
             ScanConfigSystemTexts(addon); // Cache bef�llen, nichts ansagen
@@ -7870,12 +8011,23 @@ public sealed class UIReaderService : IDisposable
     // Control - Slider links/rechts, Dropdown-Auswahl - sprechen nur den
     // neuen Wert, nicht die ganze Zeile).
     private nint _csFocusPtr;
+    private nint _csFocusAddon;
     private nint _csFocusTop;
     private int _csFocusTopIdx = -1;
     private string _csFocusValue = string.Empty;
     // True while the focused control is a 0..100 slider - its value is spoken as
     // a percentage ("100 %") on focus AND while adjusting. Reset per fresh focus.
     private bool _csFocusPercent;
+    private string _csFocusLabel = string.Empty;
+    private bool _csFocusSystemVolume;
+
+    private void ResetConfigGlobalFocus()
+    {
+        _csFocusPtr = _csFocusAddon = _csFocusTop = 0;
+        _csFocusTopIdx = -1;
+        _csFocusValue = _csFocusLabel = string.Empty;
+        _csFocusPercent = _csFocusSystemVolume = false;
+    }
 
     /// <summary>
     /// Announces text-less config controls (sliders, drop-downs, category
@@ -7891,13 +8043,21 @@ public sealed class UIReaderService : IDisposable
     /// </summary>
     private unsafe void AnnounceConfigGlobalFocus(AtkUnitBase* addon)
     {
+        if (IsSystemVolumeEditing) return;
         var stage = AtkStage.Instance();
-        if (stage == null || stage->AtkInputManager == null) return;
+        if (stage == null || stage->AtkInputManager == null) { ResetConfigGlobalFocus(); return; }
         var focus = stage->AtkInputManager->FocusedNode;
-        if (focus == null) return;
+        if (focus == null) { ResetConfigGlobalFocus(); return; }
+
+        // Re-resolve ownership every time. The game can reuse a focus address
+        // after a tab/window change; cached pointers then name the old slider.
+        var owner = FindTopLevelOwner(addon, focus, out var ownerIdx);
+        if (owner == null || !IsEffectivelyVisible(owner)) { ResetConfigGlobalFocus(); return; }
+        var isVolume = TrySystemVolumeLabel(addon, owner, out var volumeLabel);
 
         AtkResNode* top;
-        if ((nint)focus == _csFocusPtr)
+        if ((nint)focus == _csFocusPtr && (nint)addon == _csFocusAddon && (nint)owner == _csFocusTop
+            && (!isVolume || volumeLabel == _csFocusLabel))
         {
             // Focus unchanged: reuse the cached control, only track its value.
             if (_csFocusTop == 0) return;
@@ -7907,17 +8067,21 @@ public sealed class UIReaderService : IDisposable
             {
                 _csFocusValue = newValue;
                 _log.Info($"[CS] Wert-Änderung: '{newValue}'");
-                _tolk.SpeakInterrupt(FormatSliderSpeech(newValue, _csFocusPercent));
+                _tolk.SpeakInterrupt(_csFocusSystemVolume
+                    ? AccessibilityStrings.SliderPercent(_csFocusLabel, newValue)
+                    : FormatSliderSpeech(newValue, _csFocusPercent));
             }
             return;
         }
 
         // Fresh focus: find the top-level component that CONTAINS the node.
         _csFocusPtr = (nint)focus;
-        var owner = FindTopLevelOwner(addon, focus, out var ownerIdx);
+        _csFocusAddon = (nint)addon;
         _csFocusTop = (nint)owner;
         _csFocusTopIdx = ownerIdx;
         _csFocusPercent = false; // only 0..100 sliders set this true below
+        _csFocusSystemVolume = false;
+        _csFocusLabel = string.Empty;
         if (owner == null)
         {
             _log.Info($"[CS] Fokus (global): Node 0x{(nint)focus:X} gehört keinem Top-Level-Control");
@@ -7940,7 +8104,10 @@ public sealed class UIReaderService : IDisposable
                 // value-change branch above still detects changes reliably.
                 _csFocusPercent = slider->MinValue == 0 && slider->MaxValue == 100;
                 _csFocusValue = slider->Value.ToString();
-                var sliderLabel = ConfigControlLabel(addon, top, _csFocusTopIdx, forwardFirst: false);
+                _csFocusSystemVolume = isVolume && _csFocusPercent;
+                var sliderLabel = _csFocusSystemVolume ? volumeLabel
+                    : ConfigControlLabel(addon, top, _csFocusTopIdx, forwardFirst: false);
+                _csFocusLabel = sliderLabel;
                 // Percentage sliders (volumes) get the SHORT form "label, value %"
                 // so it finishes speaking before the user moves on; other sliders
                 // keep the full form with their real min/max range.
@@ -7948,6 +8115,7 @@ public sealed class UIReaderService : IDisposable
                     ? AccessibilityStrings.SliderPercent(sliderLabel, _csFocusValue)
                     : AccessibilityStrings.SliderDesc(sliderLabel, _csFocusValue,
                         slider->MinValue, slider->MaxValue);
+                if (_csFocusSystemVolume) desc += ". " + AccessibilityStrings.SystemVolumeEditHint;
                 break;
             }
             case ComponentType.DropDownList:
@@ -8620,7 +8788,7 @@ public sealed class UIReaderService : IDisposable
         try
         {
             File.WriteAllText(dumpFile, output, System.Text.Encoding.UTF8);
-            _tolk.SpeakInterrupt($"ConfigSystem Dump. {addon->UldManager.NodeListCount} Nodes.");
+        _tolk.SpeakInterrupt(AccessibilityStrings.SystemConfigProbeSaved(addon->UldManager.NodeListCount));
             _log.Info($"[CS-DIAG] Gespeichert: {dumpFile}");
         }
         catch (Exception ex)
@@ -8645,6 +8813,9 @@ public sealed class UIReaderService : IDisposable
     // counts is only visible on screen.
     private unsafe void ScanAddonTexts(string addonName, AtkUnitBase* addon, bool isInit)
     {
+        if (IsSuppressedCharaSelect(addonName)) return;
+        if (IsSuppressedCharaMakeCity(addonName)) return;
+        if (IsTableReading) return;
         if (!_genericTextCache.TryGetValue(addonName, out var cache))
         {
             cache = new Dictionary<uint, string>();
@@ -10112,8 +10283,9 @@ public sealed class UIReaderService : IDisposable
             _birthDayHelpSpoken = true;
             // Help-Handler puffert denselben Text fuer Volk/Stamm — sonst kaeme er
             // gleich nochmal ueber FlushPendingRaceDescription.
-            _pendingRaceDescription = string.Empty;
+            _charaMakeHelp.Clear();
             _lastCharaMakeHelpText = help;
+            _lastCharaMakeHelpOwner = "_CharaMakeBirthDay";
             _log.Info($"[Accessibility] BirthDay geoeffnet, Hilfe ({help.Length} Zeichen).");
         }
 
@@ -10233,12 +10405,32 @@ public sealed class UIReaderService : IDisposable
     }
 
     private string _lastCharaMakeHelpText = string.Empty;
+    private string _lastCharaMakeHelpOwner = string.Empty;
+    private readonly CharaMakeHelpBuffer _charaMakeHelp = new();
+
+    private string CharaMakeHelpOwner()
+    {
+        // Class takes precedence during a transition: the shared help pane can
+        // still display the previously selected guardian for several frames.
+        foreach (var owner in CharaMakeHelpOwners)
+            if (IsAddonVisible(owner)) return owner;
+        return string.Empty;
+    }
+
+    private static readonly string[] CharaMakeHelpOwners =
+    [
+        "_CharaMakeClassSelector", "_CharaMakeBirthDay", "_CharaMakeRaceGender",
+        "_CharaMakeTribe", "_CharaMakeFeature", "_CharaMakeGuardian",
+        "_CharaMakeCity", "_CharaMakeWorldServer", "_CharaMakeCharaName",
+    ];
 
     private void OnCharaMakeHelpOpen(AddonEvent type, AddonArgs args)
     {
         // Fresh pane: forget the old text so an unchanged description is
         // announced again when the creation screen is re-entered.
         _lastCharaMakeHelpText = string.Empty;
+        _lastCharaMakeHelpOwner = string.Empty;
+        _charaMakeHelp.Clear();
     }
 
     /// <summary>
@@ -10265,6 +10457,14 @@ public sealed class UIReaderService : IDisposable
 
     private unsafe void OnCharaMakeHelpUpdate(AddonEvent type, AddonArgs args)
     {
+        var owner = CharaMakeHelpOwner();
+        if (owner.Length == 0 || owner == "_CharaMakeClassSelector")
+        {
+            _charaMakeHelp.Clear();
+            _lastCharaMakeHelpText = string.Empty;
+            _lastCharaMakeHelpOwner = owner;
+            return;
+        }
         var addon = (AtkUnitBase*)(nint)args.Addon;
         if (addon == null) { ProbeHelpState("Addon-Zeiger null"); return; }
         if (!addon->IsVisible) { ProbeHelpState("Addon unsichtbar"); return; }
@@ -10274,13 +10474,14 @@ public sealed class UIReaderService : IDisposable
         if (node->Type != NodeType.Text) { ProbeHelpState($"Node id=4 ist kein Text (Type={node->Type})"); return; }
         if (!node->IsVisible()) { ProbeHelpState("Node id=4 unsichtbar"); return; }
 
-        var text = AtkText.Read((AtkTextNode*)node).Trim();
-        if (text == _lastCharaMakeHelpText)
+        var text = AtkText.ReadClean((AtkTextNode*)node).Trim();
+        if (text == _lastCharaMakeHelpText && owner == _lastCharaMakeHelpOwner)
         {
             ProbeHelpState($"Text unveraendert (Laenge {text.Length})");
             return;
         }
         _lastCharaMakeHelpText = text;
+        _lastCharaMakeHelpOwner = owner;
         if (string.IsNullOrWhiteSpace(text)) { ProbeHelpState("Text leer"); return; }
 
         // Namenstag offen: Hilfe gehoert hierher, nicht in den Volk/Stamm-Puffer.
@@ -10290,7 +10491,7 @@ public sealed class UIReaderService : IDisposable
         {
             _tolk.SpeakInterrupt(text);
             _birthDayHelpSpoken = true;
-            _pendingRaceDescription = string.Empty;
+            _charaMakeHelp.Clear();
             ProbeHelpState($"BirthDay-Hilfe ({text.Length} Zeichen)");
             _log.Info($"[Accessibility] BirthDay Hilfe (nachgereicht, {text.Length} Zeichen).");
 
@@ -10313,15 +10514,10 @@ public sealed class UIReaderService : IDisposable
         // announcement interrupts (log 2026-07-18 11:08:56.881 description ->
         // .886 interrupt). Buffered instead, so the order is headline first,
         // description after - and the description is never cut off.
-        _pendingRaceDescription = text;
-        _pendingRaceDescriptionAt = Environment.TickCount64;
+        _charaMakeHelp.Queue(owner, text, Environment.TickCount64);
         ProbeHelpState($"gepuffert (Laenge {text.Length})");
         _log.Info($"[Accessibility] CharaMake-Beschreibung: '{TolkService.Sanitize(text)}'");
     }
-
-    // Buffered race/tribe description (see OnCharaMakeHelpUpdate).
-    private string _pendingRaceDescription = string.Empty;
-    private long   _pendingRaceDescriptionAt;
 
     /// <summary>Speaks a buffered description. Called right after the
     /// "<race>, <gender>" headline; the frame tick flushes it as a fallback when
@@ -10329,12 +10525,10 @@ public sealed class UIReaderService : IDisposable
     /// the description arrives on its own).</summary>
     private void FlushPendingRaceDescription(bool force = false)
     {
-        if (_pendingRaceDescription.Length == 0) return;
-        if (!force && Environment.TickCount64 - _pendingRaceDescriptionAt < 250) return;
-
-        var text = _pendingRaceDescription;
-        _pendingRaceDescription = string.Empty;
-        _tolk.Speak(text); // queued, never interrupting
+        if (!_charaMakeHelp.HasPending) return;
+        var text = _charaMakeHelp.Take(CharaMakeHelpOwner(), ReadCharaMakeHelpText(),
+            Environment.TickCount64, force);
+        if (text.Length > 0) _tolk.Speak(text);
     }
 
     /// <summary>
@@ -10719,26 +10913,14 @@ public sealed class UIReaderService : IDisposable
             var ynPtr = _gameGui.GetAddonByName("SelectYesno");
             if (!ynPtr.IsNull && ((AtkUnitBase*)(nint)ynPtr)->IsVisible)
             {
-                var newText = delta < 0 ? _ynConfirmLabel : _ynCancelLabel;
-                // Log BEFORE the dedup: user reported left/right silence in
-                // V4.31 and this method logged nothing - undiagnosable.
-                _log.Info($"[Accessibility] Navigate SelectYesno: delta={delta} -> '{newText}' (zuletzt '{_lastYesNoText}')");
-                if (newText == _lastYesNoText) return;
-                _lastYesNoText = newText;
-                _tolk.SpeakInterrupt(newText);
+                MoveYesNoFocus(delta);
             }
         }
     }
 
     public unsafe void NavigateGamepad(int delta)
     {
-        var ynPtr = _gameGui.GetAddonByName("SelectYesno");
-        if (ynPtr.IsNull || !((AtkUnitBase*)(nint)ynPtr)->IsVisible) return;
-        var newText = delta < 0 ? _ynConfirmLabel : _ynCancelLabel;
-        if (newText == _lastYesNoText) return;
-        _lastYesNoText = newText;
-        _tolk.SpeakInterrupt(newText);
-        _log.Info($"[Accessibility] SelectYesno Gamepad -> {newText}");
+        // Native D-pad movement is announced by the actual focus reader.
     }
 
     /// <summary>
@@ -10820,46 +11002,39 @@ public sealed class UIReaderService : IDisposable
         return true;
     }
 
-    public unsafe void ConfirmYesNo()
+    public unsafe void ConfirmYesNo() => ConfirmFocusedYesNo();
+
+    public unsafe void AnnounceContextHelp()
     {
-        var ynPtr = _gameGui.GetAddonByName("SelectYesno");
-        if (ynPtr.IsNull)
+        if (IsAddonVisible("SelectYesno")) { _tolk.SpeakInterrupt(AccessibilityStrings.DialogHelp); return; }
+        if (IsAddonVisible("SystemMenu")) { _tolk.SpeakInterrupt(AccessibilityStrings.SystemMenuHelp); return; }
+        if (IsSystemVolumeEditing)
         {
-            _log.Info("[Accessibility] ConfirmYesNo: SelectYesno nicht gefunden.");
+            _tolk.SpeakInterrupt(AccessibilityStrings.SystemVolumeEditInstructions);
             return;
         }
-        var addon = (AtkUnitBase*)(nint)ynPtr;
-        if (!addon->IsVisible)
+        if (IsTableReading)
         {
-            _log.Info("[Accessibility] ConfirmYesNo: SelectYesno nicht sichtbar.");
+            _tolk.SpeakInterrupt(AccessibilityStrings.TableInstructions);
             return;
         }
-        var isCancel    = _lastYesNoText == _ynCancelLabel;
-        var idx         = isCancel ? 1 : 0;
-        var shouldClose = addon->ShouldFireCallbackAndHideOrClose;
-        _log.Info($"[Accessibility] ConfirmYesNo: '{_lastYesNoText}' idx={idx} ShouldFireCallbackAndHideOrClose={shouldClose}");
-
-        if (isCancel)
+        if (IsAddonVisible("Character") || IsAddonVisible("ActionMenu"))
         {
-            // WORKAROUND: FireCallback(1, {Int:1}) schlie�t SelectYesno nicht (Log 11:40:10 best�tigt).
-            // Nein hat keinen Callback � das Spiel schlie�t das Fenster direkt ohne Callback.
-            // Fix: Close(true) schlie�t das Fenster ohne den Ja-Callback auszul�sen.
-            _log.Info("[Accessibility] ConfirmYesNo: Nein ? Close(true)");
-            addon->Close(true);
+            _tolk.SpeakInterrupt(AccessibilityStrings.TableHint(AccessibilityStrings.SpokenKeyLabel(_config.KeyReadTable))
+                + " " + AccessibilityStrings.TableInstructions
+                + (IsAddonVisible("ActionMenu") ? " " + AccessibilityStrings.ActionReadHint(AccessibilityStrings.SpokenKeyLabel(_config.KeyReadUI)) : ""));
+            return;
         }
-        else
+        if (IsAddonVisible("Shop"))
         {
-            // Ja: FireCallback mit idx=0 + ShouldFireCallbackAndHideOrClose=True (best�tigt funktionst�chtig).
-            if (!shouldClose)
-                addon->ShouldFireCallbackAndHideOrClose = true;
-            var v = stackalloc AtkValue[1]; v[0].SetInt(0);
-            addon->FireCallback(1, v);
+            _tolk.SpeakInterrupt(AccessibilityStrings.ShopQuantityHint(AccessibilityStrings.SpokenKeyLabel(_config.KeyShopQuantity))
+                + " " + AccessibilityStrings.ShopQuantityInstructions);
+            return;
         }
-        _lastYesNoText = string.Empty;
-    }
-
-    public void AnnounceContextHelp()
-    {
+        unsafe
+        {
+            if (FindFocusedButton() != null) { _tolk.SpeakInterrupt(AccessibilityStrings.FocusedButtonHelp); return; }
+        }
         _activeScreenContext = GetCurrentScreenContext();
         var text = _activeScreenContext switch
         {
@@ -10887,6 +11062,15 @@ public sealed class UIReaderService : IDisposable
 
     public unsafe void HandleConfirmKey()
     {
+        if (IsChatInputActive()) return;
+        var yesNoPtr = _gameGui.GetAddonByName("SelectYesno");
+        if (!yesNoPtr.IsNull && ((AtkUnitBase*)(nint)yesNoPtr)->IsVisible)
+        {
+            ConfirmYesNo();
+            return;
+        }
+
+        if (TryPressFocusedButton()) return;
         var titleMenuPtr = _gameGui.GetAddonByName("_TitleMenu");
         if (!titleMenuPtr.IsNull && ((AtkUnitBase*)(nint)titleMenuPtr)->IsVisible)
         {
@@ -10895,15 +11079,10 @@ public sealed class UIReaderService : IDisposable
             {
                 _activeScreenContext = ScreenContext.TitleMenu;
                 RememberTitleMenuSelection(selection.Item, selection.Index);
-                _tolk.SpeakInterrupt(AccessibilityStrings.Confirmed(selection.Item));
+                // Native Enter handles this list. Hearing its name alone is not
+                // evidence that the game has accepted the selected action.
+                _tolk.SpeakInterrupt(selection.Item);
             }
-            return;
-        }
-
-        var yesNoPtr = _gameGui.GetAddonByName("SelectYesno");
-        if (!yesNoPtr.IsNull && ((AtkUnitBase*)(nint)yesNoPtr)->IsVisible)
-        {
-            ConfirmYesNo();
             return;
         }
 
@@ -10967,6 +11146,82 @@ public sealed class UIReaderService : IDisposable
         if (list->SelectedItemIndex == idx) return;
         list->SelectItem(idx, false);
         _log.Info($"[ContextMenu] Auswahl vorbereitet: Sel -> {idx} (für Spiel-OK).");
+    }
+
+    /// <summary>Uses only the game's offered "Place in Armoury Chest" menu row
+    /// for the exact physical bag slot. The game chooses the destination section.</summary>
+    public unsafe ArmouryMenuActionResult TryPlaceContextItemInArmoury(
+        InventoryType source, ushort slot, uint itemId, uint ownerAddonId, bool finishWaiting)
+    {
+        var ptr = _gameGui.GetAddonByName("ContextMenu");
+        if (ptr.IsNull) return ArmouryMenuActionResult.NotReady;
+        var addon = (AtkUnitBase*)(nint)ptr;
+        var agent = AgentInventoryContext.Instance();
+        if (addon == null || !addon->IsVisible || agent == null ||
+            agent->TargetInventorySlot == null || agent->ContextCallbackInfos == null)
+            return ArmouryMenuActionResult.NotReady;
+
+        if (agent->OwnerAddonId != ownerAddonId ||
+            agent->TargetInventoryId != source || agent->TargetInventorySlotId != slot ||
+            agent->TargetInventorySlot->GetItemId() != itemId)
+            return ArmouryMenuActionResult.WrongItem;
+
+        var list = FindListInAddon(addon);
+        if (list == null || agent->ContextItemCount <= 0)
+            return ArmouryMenuActionResult.NotReady;
+
+        var count = agent->ContextItemCount;
+        // The ContextMenu addon can be visible before its list has any rows.
+        // Keep waiting instead of treating that frame as a missing command.
+        if (count <= 0 || count > 32 || GetListEntryCount(list) != count)
+            return ArmouryMenuActionResult.NotReady;
+
+        var englishAddons = _data.GetExcelSheet<Lumina.Excel.Sheets.Addon>(ClientLanguage.English);
+        var gameLabel = _data.GetExcelSheet<Lumina.Excel.Sheets.Addon>()
+            .GetRowOrDefault(1387)?.Text.ExtractText() ?? string.Empty;
+        var rows = new ArmouryMenuRow[count];
+        for (var i = 0; i < count; i++)
+        {
+            var disabled = agent->IsContextItemDisabled(i);
+            var displayed = TolkService.Sanitize(ReadListItemText(list, i)).Trim();
+            var labelId = agent->ContextCallbackInfos[i].LabelId;
+            var english = labelId != 0
+                ? englishAddons.GetRowOrDefault(labelId)?.Text.ExtractText().Trim() ?? string.Empty
+                : string.Empty;
+            rows[i] = new ArmouryMenuRow(labelId, disabled, displayed, english);
+        }
+
+        var result = ArmouryTransferRules.SelectCommand(rows, gameLabel, Loc.IsRussian, finishWaiting, out var match);
+        if (result != ArmouryMenuActionResult.Requested)
+        {
+            if (result == ArmouryMenuActionResult.NotReady) return result;
+            var menuRows = new List<string>(count);
+            for (var i = 0; i < count; i++)
+            {
+                var labelId = agent->ContextCallbackInfos[i].LabelId;
+                var english = labelId != 0
+                    ? englishAddons.GetRowOrDefault(labelId)?.Text.ExtractText().Trim() ?? string.Empty
+                    : string.Empty;
+                menuRows.Add($"{i}: label={labelId}, disabled={agent->IsContextItemDisabled(i)}, " +
+                             $"shown='{TolkService.Sanitize(ReadListItemText(list, i)).Trim()}', english='{english}'");
+            }
+            _log.Warning($"[ArmouryBulk] Kein benutzbarer Arsenalbefehl für {itemId} aus {source}/{slot}; " +
+                         $"ContextItemCount={agent->ContextItemCount}, ListLength={GetListEntryCount(list)}; " +
+                         string.Join(" | ", menuRows));
+            return ArmouryMenuActionResult.Unavailable;
+        }
+
+        var values = stackalloc AtkValue[5];
+        values[0].SetInt(0);
+        values[1].SetInt(match);
+        values[2].SetUInt(0);
+        values[3].SetInt(0);
+        values[4].SetInt(0);
+        addon->FireCallback(5, values);
+        agent->AgentInterface.Hide();
+        addon->Hide(false, true, 0);
+        _log.Info($"[ArmouryBulk] Spielbefehl für {itemId} aus {source}/{slot} ausgeführt, Menüzeile {match}.");
+        return ArmouryMenuActionResult.Requested;
     }
 
     /// <summary>
@@ -11404,7 +11659,7 @@ public sealed class UIReaderService : IDisposable
     /// CharaMake*/TitleDCWorldMap so Enter keeps its game meaning elsewhere.
     /// </summary>
     // Confirm-button labels in priority order (German client).
-    private static readonly string[] ConfirmButtonLabels = ["Ok", "Bestätigen"];
+    private static readonly string[] ConfirmButtonLabels = ["Ok", "ОК", "Bestätigen", "Confirm", "Подтвердить", "Confirmer", "確認"];
 
     public unsafe void PressFocusedOk()
     {
@@ -11455,6 +11710,7 @@ public sealed class UIReaderService : IDisposable
 
             var text = CleanRaceName(ReadFirstTextInComponent(node));
             if (!string.Equals(text, label, StringComparison.OrdinalIgnoreCase)) continue;
+            if (!NativeDialogButtons.Available(node)) continue;
 
             // Click event registration usually sits on the collision child,
             // sometimes on the component node itself - search both.
@@ -11576,6 +11832,7 @@ public sealed class UIReaderService : IDisposable
 
             var t = AtkText.Read((AtkTextNode*)n).Trim();
             if (string.IsNullOrWhiteSpace(t) || t.Length <= 1) continue;
+            t = _gearInfo.TranslateClassLabel(_inventory.TranslateItemLabel(t));
             if (parts.Contains(t)) continue; // name appears twice in the tooltip
             parts.Add(t);
         }
@@ -11586,33 +11843,6 @@ public sealed class UIReaderService : IDisposable
         _log.Info($"[Item] Tooltip: {parts.Count} Teile - {msg}");
         _tolk.SpeakInterrupt(msg);
         return true;
-    }
-
-    /// <summary>
-    /// The condition (durability) line of the open item tooltip, in the game's
-    /// own words - "Zustand 87 Prozent" / "Condition: 87%". Read from the tooltip
-    /// node the game fills (AddonItemDetail.ConditionValue), never derived: the
-    /// percentage is relative to a maximum that lives in the item sheet, and the
-    /// game has already done that arithmetic for the line it draws.
-    ///
-    /// The caller only asks while the item agent names THIS slot's item, so a
-    /// tooltip about some other item cannot contribute a number here.
-    ///
-    /// Empty when the tooltip is closed, when the item has no condition line at
-    /// all (materials, crystals), or while that line is hidden - the caller then
-    /// falls back to the owned item instance (InventoryService).
-    /// </summary>
-    private unsafe string ReadTooltipCondition()
-    {
-        var ptr = _gameGui.GetAddonByName("ItemDetail");
-        if (ptr.IsNull) return string.Empty;
-
-        var addon = (AddonItemDetail*)(nint)ptr;
-        if (!addon->IsVisible) return string.Empty;
-        if (addon->ConditionLine == null || !addon->ConditionLine->IsVisible()) return string.Empty;
-        if (addon->ConditionValue == null) return string.Empty;
-
-        return AtkText.ReadClean(addon->ConditionValue).Trim();
     }
 
     /// <summary>
@@ -11683,6 +11913,11 @@ public sealed class UIReaderService : IDisposable
 
     public unsafe void ReadCurrentFocus()
     {
+        if (TryReadYesNoDialog()) return;
+        if (TryReadSelectOk()) return;
+        if (_charaMake.TryReadClass()) return;
+        if (TryReadSelectedActionDescription()) return;
+        if (TryReadSupplyPaneDetail()) return;
         // Quest-Journal offen? Dann will der User die QUEST lesen, nicht die Liste.
         if (TryReadQuestDetail()) return;
 
@@ -12397,6 +12632,8 @@ public sealed class UIReaderService : IDisposable
 
     private unsafe string ReadYesNoQuestion(AtkUnitBase* addon)
     {
+        var prompt = AtkText.ReadClean(((AddonSelectYesno*)addon)->PromptText).Trim();
+        if (prompt.Length > 0) return prompt;
         for (uint id = 2; id <= 20; id++)
         {
             var node = addon->GetNodeById(id);
@@ -13636,8 +13873,8 @@ public sealed class UIReaderService : IDisposable
     /// The complete recipe under the cursor, spoken on the read-menu key: name,
     /// class and level, the craft values, how many are craftable and already
     /// owned, every material with required amount and NQ/HQ stock, and the
-    /// requirement lines. All values come from AddonRecipeNote's named nodes, so
-    /// the numbers are exactly the ones the window displays.
+    /// requirement lines. Material amounts come from the selected recipe's game
+    /// data because the window's quantity text nodes can be empty.
     /// Returns false when the crafting log is not open, so the read-menu key
     /// falls through to its other readers.
     /// </summary>
@@ -13656,7 +13893,11 @@ public sealed class UIReaderService : IDisposable
             return true;
         }
 
-        var parts = new List<string> { name };
+        var parts = new List<string> { _inventory.TranslateItemLabel(name) };
+
+        var player = _objectTable.LocalPlayer;
+        if (player != null && player.MaxCp > 0)
+            parts.Add(AccessibilityStrings.CraftingPoints(player.CurrentCp, player.MaxCp).TrimEnd('.'));
 
         var job   = AtkText.ReadClean(addon->CurrentJobName).Trim();
         var level = AtkText.ReadClean(addon->CurrentJobLevel).Trim();
@@ -13696,36 +13937,23 @@ public sealed class UIReaderService : IDisposable
     }
 
     /// <summary>
-    /// One line per filled material slot plus the crystals. A slot counts as
-    /// filled when its name node carries text - the window keeps all six slots
-    /// alive and blanks the unused ones (dump 2026-08-08: id=94..90 empty,
-    /// id=89 "Dreckiges Wasser").
+    /// One line per material plus the crystals. Prefer the selected recipe's
+    /// ingredient data: it carries the required amount even when the window's
+    /// quantity text node is blank. Only use it when its result name matches the
+    /// visible selection, so a recipe change cannot mix two recipes in one read.
+    /// The window's material nodes remain a fallback while game data loads.
     /// </summary>
-    private static unsafe List<string> ReadRecipeMaterials(AddonRecipeNote* addon)
+    private unsafe List<string> ReadRecipeMaterials(AddonRecipeNote* addon)
     {
-        var lines = new List<string>();
-
-        foreach (var ing in addon->Ingredients)
-        {
-            var matName = AtkText.ReadClean(ing.Name).Trim();
-            if (matName.Length == 0) continue;
-            lines.Add(AccessibilityStrings.RecipeMaterial(
-                matName,
-                AtkText.Read(ing.QuantityRequiredForCraft).Trim(),
-                AtkText.Read(ing.QuantityInInventoryNq).Trim(),
-                AtkText.Read(ing.QuantityInInventoryHq).Trim()));
-        }
-
-        // Crystals are icon-only in this window - CrystalNodes carries Image but
-        // no name node, so the element is announced unnamed rather than guessed.
-        foreach (var crystal in addon->Crystals)
-        {
-            var needed = AtkText.Read(crystal.QuantityRequiredForCraft).Trim();
-            if (needed.Length == 0 || needed == "0") continue;
-            lines.Add(AccessibilityStrings.RecipeCrystal(
-                needed, AtkText.Read(crystal.QuantityInInventory).Trim()));
-        }
-
+        var game = FFXIVClientStructs.FFXIV.Client.Game.UI.RecipeNote.Instance();
+        var data = game != null && game->IsRecipeListReady ? game->RecipeList : null;
+        var recipe = data != null && data->Recipes != null && data->SelectedIndex < data->RecipeCount
+            ? data->Recipes + data->SelectedIndex : null;
+        var lines = RecipeMaterialReader.Read(addon, recipe, _inventory.ResolveItemName,
+            _inventory.TranslateItemLabel, (id, hq) => _inventory.CountOf(id, hq),
+            recipe == null ? null : RecipeMaterialReader.FromSheet(_data, recipe->RecipeId));
+        _log.Info($"[Recipe] Materials: visible='{AtkText.ReadClean(addon->SelectedRecipeName)}', "
+            + $"runtime='{(recipe != null ? AtkText.ReadClean(&recipe->ItemName) : string.Empty)}', lines={lines.Count}");
         return lines;
     }
 
@@ -14319,13 +14547,11 @@ public sealed class UIReaderService : IDisposable
     ///
     /// Announced is the entry's NAME plus its position ("Charakter, 2 von 7").
     ///
-    /// The name comes from the button's own ButtonClick event: its parameter is
-    /// the row id in the Lumina sheet MainCommand. That mapping was PROVEN by
-    /// the V5.16 probe (log 2026-07-19 15:33), not assumed - all seven buttons
-    /// carried params 1..7 resolving to a coherent menu group (Initiative,
-    /// Charakter, Kommandoliste, Archiv, Timer, Errungenschaften,
-    /// Sammler-Notizbuch), and param ran exactly parallel to the position
-    /// computed below, each confirming the other.
+    /// ButtonClick.Param identifies MainCommandCategory, NOT MainCommand.
+    /// The player log of 2026-09-29 proves the old mapping wrong: param 4
+    /// opened Travel, and param 7 opened System after we said Gathering Log.
+    /// Category ids 1..7 and command 7's Logs category are checked against the
+    /// installed game data by tools/main-menu-check.
     ///
     /// The position is measured too: the buttons are counted in the addon's own
     /// node list and the focused one located by identity. It stays as the
@@ -14372,7 +14598,7 @@ public sealed class UIReaderService : IDisposable
         // No window name: "Hauptmenü" was wrong (user 2026-07-19 - "es ist nicht
         // das hauptmenü"), and the addon's internal name (_MainCommand) is not a
         // name a player would recognise.
-        var name = ReadMainCommandName(button);
+        var name = ReadMainCommandCategoryName(button);
         text = name.Length > 0
             ? $"{name}, {AccessibilityStrings.Counter(position, buttons.Count)}"
             : AccessibilityStrings.Counter(position, buttons.Count);
@@ -14380,16 +14606,23 @@ public sealed class UIReaderService : IDisposable
     }
 
     /// <summary>
-    /// Name of a main-menu button, "" if it carries no click event or the
-    /// parameter addresses no sheet row. Reading the event rather than indexing
-    /// the sheet by position means a menu that gains, loses or reorders entries
-    /// still announces correctly - the button states its own command id.
+    /// Name of a main-menu category, "" if its event or category row is missing.
+    /// The event identifies the category even if the visible buttons reorder.
+    /// Never fall back to a command id or infer a category from its position.
     /// </summary>
-    private unsafe string ReadMainCommandName(AtkResNode* button)
+    private unsafe string ReadMainCommandCategoryName(AtkResNode* button)
     {
         var evt = FindEventOfType(button, AtkEventType.ButtonClick);
         if (evt == null) return string.Empty;
-        return LookupMainCommandName(evt->Param);
+        try
+        {
+            return MainCommandMenu.ReadCategoryName(_data, evt->Param);
+        }
+        catch (Exception ex)
+        {
+            _log.Error(ex, $"[MainCmd] Category lookup failed for id={evt->Param}");
+            return string.Empty;
+        }
     }
 
     /// <summary>Name of a MainCommand sheet row, "" if the id has no row.</summary>
@@ -14400,7 +14633,7 @@ public sealed class UIReaderService : IDisposable
             var sheet = _data.GetExcelSheet<Lumina.Excel.Sheets.MainCommand>();
             if (sheet == null) return string.Empty;
             var row = sheet.GetRowOrDefault(rowId);
-            return row?.Name.ExtractText().Trim() ?? string.Empty;
+            return row is { } command ? RussianGameText.Name(_data, command, x => x.Name).Trim() : string.Empty;
         }
         catch (Exception ex)
         {
@@ -14506,16 +14739,13 @@ public sealed class UIReaderService : IDisposable
     /// AddonCharacter exists in FFXIVClientStructs but carries only TabIndex and
     /// TabCount (ilspycmd 2026-07-19), so it offers no button names either.
     ///
-    /// WHY EVENTS: this is the route that PROVED itself in V5.18. The
-    /// _MainCommand buttons were equally textless, and their ButtonClick
-    /// parameter turned out to be the MainCommand sheet row - three independent
-    /// checks confirmed it (params ran 1..7 parallel to the positions, the names
-    /// formed a coherent menu group, and the z-order cross-check matched). The
-    /// user asks for buttons like "Aktualisieren", which exist in many windows,
-    /// so a generic route matters more than a Character-window special case.
+    /// Event parameters have addon-specific meanings. For _MainCommand they
+    /// address MainCommandCategory; the old MainCommand interpretation was
+    /// disproved by the player log of 2026-09-29. Plausible labels alone cannot
+    /// prove a mapping. Other addons need independent evidence.
     ///
-    /// The parameter is resolved against BOTH candidate sheets - Addon (the
-    /// game's UI label sheet) and MainCommand (proven for the main menu) - so
+    /// The parameter is resolved against candidate sheets - Addon (the game's
+    /// UI label sheet), MainCommand and MainCommandCategory - so
     /// the log shows which one produces sensible names. Nothing is announced
     /// until that mapping is confirmed against what the buttons actually do:
     /// a wrong label sends a blind player into the wrong window, which is worse
@@ -14547,7 +14777,7 @@ public sealed class UIReaderService : IDisposable
     }
 
     /// <summary>The sheet rows an event parameter would address, "" when it hits
-    /// none. Both candidates are shown so the log decides which sheet applies -
+    /// none. Candidates are shown so the log decides which sheet applies -
     /// picking one up front would be a guess.</summary>
     private string DescribeParamRows(uint param)
     {
@@ -14558,6 +14788,13 @@ public sealed class UIReaderService : IDisposable
 
         var main = LookupMainCommandName(param);
         if (main.Length > 0) bits.Add($"MainCommand:'{main}'");
+
+        try
+        {
+            var category = MainCommandMenu.ReadCategoryName(_data, param);
+            if (category.Length > 0) bits.Add($"MainCommandCategory:'{category}'");
+        }
+        catch { /* Diagnostic candidates must not interrupt focus reading. */ }
 
         return bits.Count > 0 ? " -> " + string.Join(" ", bits) : string.Empty;
     }
@@ -15257,14 +15494,18 @@ public sealed class UIReaderService : IDisposable
     /// <summary>Icon id -&gt; minion name, built once from the Companion sheet and
     /// cached. Note the sheet names the column <c>Singular</c>; there is no
     /// <c>Name</c> column, same as Mount.</summary>
+    private bool _companionNamesRussian;
+    private bool _mountNamesRussian;
+
     private Dictionary<uint, string> CompanionByIcon()
     {
-        if (_companionByIcon != null) return _companionByIcon;
+        if (_companionByIcon != null && _companionNamesRussian == Loc.IsRussian) return _companionByIcon;
+        _companionNamesRussian = Loc.IsRussian;
         var map = new Dictionary<uint, string>();
         foreach (var row in _data.GetExcelSheet<LuminaCompanion>())
         {
             if (row.RowId == 0 || row.Icon == 0) continue;
-            var name = row.Singular.ExtractText();
+            var name = RussianGameText.Name(_data, row, x => x.Singular);
             if (!string.IsNullOrWhiteSpace(name)) map[row.Icon] = name;
         }
         _log.Info($"[Minion] Icon-Map gebaut: {map.Count} Begleiter.");
@@ -15274,12 +15515,13 @@ public sealed class UIReaderService : IDisposable
     /// <summary>Icon id -&gt; mount name, built once from the Mount sheet and cached.</summary>
     private Dictionary<uint, string> MountByIcon()
     {
-        if (_mountByIcon != null) return _mountByIcon;
+        if (_mountByIcon != null && _mountNamesRussian == Loc.IsRussian) return _mountByIcon;
+        _mountNamesRussian = Loc.IsRussian;
         var map = new Dictionary<uint, string>();
         foreach (var row in _data.GetExcelSheet<LuminaMount>())
         {
             if (row.RowId == 0 || row.Icon == 0) continue;
-            var name = row.Singular.ExtractText();
+            var name = RussianGameText.Name(_data, row, x => x.Singular);
             if (!string.IsNullOrWhiteSpace(name)) map[row.Icon] = name;
         }
         _log.Info($"[Mount] Icon-Map gebaut: {map.Count} Reittiere.");
@@ -15412,10 +15654,11 @@ public sealed class UIReaderService : IDisposable
         _addonLifecycle.UnregisterListener(AddonEvent.PostUpdate, "TalkSubtitle", OnTalkUpdate);
         _addonLifecycle.UnregisterListener(AddonEvent.PostUpdate, "_BattleTalk",  OnTalkUpdate);
         _addonLifecycle.UnregisterListener(AddonEvent.PostSetup,        "SelectYesno", OnYesNoOpen);
-        _addonLifecycle.UnregisterListener(AddonEvent.PostReceiveEvent, "SelectYesno", OnYesNoReceive);
+        _addonLifecycle.UnregisterListener(AddonEvent.PreReceiveEvent, "SelectYesno", OnYesNoReceive);
+        _addonLifecycle.UnregisterListener(AddonEvent.PostSetup, "SelectOk", OnSelectOkUpdate);
+        _addonLifecycle.UnregisterListener(AddonEvent.PostUpdate, "SelectOk", OnSelectOkUpdate);
         _addonLifecycle.UnregisterListener(AddonEvent.PostUpdate, "SelectYesno",   OnDialogButtonProbe);
         _addonLifecycle.UnregisterListener(AddonEvent.PostUpdate, "JournalResult", OnDialogButtonProbe);
-        _addonLifecycle.UnregisterListener(AddonEvent.PostUpdate, "ArmouryBoard",  OnArmouryBoardUpdate);
         _addonLifecycle.UnregisterListener(AddonEvent.PostUpdate, "GrandCompanyExchange", OnGrandCompanyUpdate);
         _addonLifecycle.UnregisterListener(AddonEvent.PostUpdate, "GrandCompanyRank", OnGrandCompanyRankUpdate);
         _addonLifecycle.UnregisterListener(AddonEvent.PostUpdate, "Inventory", OnInventoryUpdate);
@@ -15432,6 +15675,8 @@ public sealed class UIReaderService : IDisposable
         _addonLifecycle.UnregisterListener(AddonEvent.PostUpdate, "BeginnersMansionProblem", OnBeginnersArenaUpdate);
         _addonLifecycle.UnregisterListener(AddonEvent.PostUpdate, "ContentsFinderConfirm", OnContentsFinderConfirmUpdate);
         _addonLifecycle.UnregisterListener(AddonEvent.PostUpdate, "Bank", OnBankUpdate);
+        _addonLifecycle.UnregisterListener(AddonEvent.PostUpdate, "Trade", OnTradeUpdate);
+        _addonLifecycle.UnregisterListener(AddonEvent.PreFinalize, "Trade", OnTradeClose);
         _addonLifecycle.UnregisterListener(OnSelectStringOpen);
         _addonLifecycle.UnregisterListener(AddonEvent.PostSetup, "Request", OnRequestOpen);
         _addonLifecycle.UnregisterListener(AddonEvent.PostSetup, "Title", OnTitleScreenOpen);

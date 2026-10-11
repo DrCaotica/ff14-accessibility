@@ -34,9 +34,9 @@ public sealed record AreaPart(Vector3 Centre, string SpotName, float Extent);
 /// WHAT THE GAME DOES AND DOES NOT KNOW. There are no spawn points in the
 /// client: the Level sheet holds battle NPCs only for quests (checked for
 /// "Amalj'aa-Jäger" - two rows, both in other zones, none in Östliches
-/// Thanalan), everything else the server spawns. So the best the mod can do is
-/// take the player through the area and watch the object table. That is what
-/// these pieces are for - they are search points, not monster positions.
+/// Thanalan), everything else the server spawns. When the spawn list has a row
+/// for this monster in this territory, <see cref="NavigationService"/> walks
+/// that point instead. These pieces remain the search when the list has none.
 ///
 /// SOURCE. LayerEntryType.MapRange in the zone's planmap.lgb / planevent.lgb,
 /// the same files vnavmesh reads for collision. Each carries PlaceNameBlock
