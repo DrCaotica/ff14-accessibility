@@ -4140,7 +4140,7 @@ public sealed class UIReaderService : IDisposable
         if (chat->TextInput != null && owner == (AtkResNode*)chat->TextInput->OwnerNode)
         {
             var channel = ReadChatChannel(chat);
-            return channel.Length == 0 ? AccessibilityStrings.ChatInput : AccessibilityStrings.ChatInputWithChannel(channel);
+            return AccessibilityStrings.HudChannelInput(channel);
         }
         if (chat->ChannelSelectDropDown != null && owner == (AtkResNode*)chat->ChannelSelectDropDown->OwnerNode)
         {
@@ -10761,22 +10761,24 @@ public sealed class UIReaderService : IDisposable
         _tolk.SpeakInterrupt(AccessibilityStrings.ChatLogTab(name, index + 1, chat->TabCount));
     }
 
-    /// <summary>Whether the game's cursor is in the chat window - its bar or its
-    /// message panel (focused-units list, [ChatProbe] 2026-10-11 14:07:03 /
-    /// 14:07:08).</summary>
+    /// <summary>
+    /// Whether the game's cursor is in the chat window - its bar or its message
+    /// panel. Only the LAST entry of the focused-units list counts: ChatLog can
+    /// stay in the list while the cursor is elsewhere ([ChatProbe] 2026-10-11
+    /// 14:33:15 "[ChatLog,ScenarioTree]", 14:33:16 "[ChatLog,InputString]"),
+    /// and every logged list ended with the window the cursor was in.
+    /// </summary>
     private static unsafe bool IsChatWindowFocused()
     {
         var mgr = RaptureAtkUnitManager.Instance();
         if (mgr == null) return false;
         var list = mgr->AtkUnitManager.FocusedUnitsList;
-        for (var i = 0; i < list.Count && i < list.Entries.Length; i++)
-        {
-            var unit = list.Entries[i].Value;
-            if (unit == null) continue;
-            var name = unit->NameString;
-            if (name == "ChatLog" || name.StartsWith("ChatLogPanel_", StringComparison.Ordinal)) return true;
-        }
-        return false;
+        var count = Math.Min((int)list.Count, list.Entries.Length);
+        if (count == 0) return false;
+        var unit = list.Entries[count - 1].Value;
+        if (unit == null) return false;
+        var name = unit->NameString;
+        return name == "ChatLog" || name.StartsWith("ChatLogPanel_", StringComparison.Ordinal);
     }
 
 #if DEBUG

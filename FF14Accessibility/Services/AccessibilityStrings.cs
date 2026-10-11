@@ -1759,6 +1759,14 @@ public static partial class AccessibilityStrings
     public static string HudButton(string label) =>
         IsGerman ? $"{label}, Knopf" : $"{label}, button";
 
+    /// <summary>The chat input field under the HUD cursor, with the channel a
+    /// message would go to ("Kanal-Eingabe, Sagen"). Wording chosen by the user
+    /// 2026-10-11 - "Chat-Eingabe" after the area name "Chat" said Chat twice.</summary>
+    public static string HudChannelInput(string channel) =>
+        channel.Length == 0
+            ? (IsGerman ? "Kanal-Eingabe" : "Channel input")
+            : (IsGerman ? $"Kanal-Eingabe, {channel}" : $"Channel input, {channel}");
+
     /// <summary>The chat window switched its tab while the cursor is in it
     /// ("Reiter Kampf, 2 von 3").</summary>
     public static string ChatLogTab(string name, int index, int count) =>
