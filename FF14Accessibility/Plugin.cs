@@ -126,6 +126,7 @@ public sealed class Plugin : IDalamudPlugin
     private readonly TrailService       _trails;
     private readonly CharaMakeReader    _charaMake;
     private readonly UIReaderService    _uiReader;
+    private readonly GameTextSearch     _textSearch;
     // [Synthese-Fenster] Das laufende Handwerk vorlesen: Qualitaet, HQ-Chance,
     // Fortschritt, Haltbarkeit. Der Fokus-Leser liest das Fenster nur, wenn der
     // Fokus sich BEWEGT - beim Handwerk liegt der auf der Hotbar, deshalb war das
@@ -544,6 +545,7 @@ public sealed class Plugin : IDalamudPlugin
         // zum Waehler-Eintrag.
         _charaMake  = new CharaMakeReader(ObjectTable, DataManager, GameGui, _tolk, Log, _tooltips);
         _uiReader   = new UIReaderService(AddonLifecycle, GameGui, _tolk, Log, ObjectTable, _inventoryReader, _gearInfo, _bestiary, _huntingLog, _history, _config, DataManager, _tooltips, _charaMake, _lootRolls, _itemSlots, _gatherLog);
+        _textSearch = new GameTextSearch(DataManager, Framework, _tolk, Log);
         _synthesis   = new SynthesisService(GameGui, _tolk, Log);
         // [Handwerker-Notizbuch] Die Frage, die das Spiel nur fuer das ausgewaehlte
         // Rezept beantwortet: was ist mit dem Beutelinhalt jetzt herstellbar. Der
@@ -924,6 +926,13 @@ public sealed class Plugin : IDalamudPlugin
         {
             var dumpArg = trimmed.Length > 4 ? trimmed[4..].Trim() : string.Empty;
             _uiReader.DumpAddon(dumpArg);
+            return;
+        }
+
+        // "findtext <Text>" durchsucht alle Spieltexte - vor dem switch pruefen.
+        if (trimmed.StartsWith("findtext", StringComparison.OrdinalIgnoreCase))
+        {
+            _textSearch.Search(trimmed.Length > 8 ? trimmed[8..].Trim() : string.Empty);
             return;
         }
 

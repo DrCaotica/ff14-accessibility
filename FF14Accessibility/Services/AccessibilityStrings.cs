@@ -487,6 +487,32 @@ public static partial class AccessibilityStrings
             ? $"UI Dump auf Desktop gespeichert. {addonCount} Fenster, {nodeCount} Nodes."
             : $"UI dump saved to desktop. {addonCount} windows, {nodeCount} nodes.";
 
+    /// <summary>/acc findtext without a search text.</summary>
+    public static string TextSearchNoQuery =>
+        IsGerman ? "Suchtext fehlt. Beispiel: /acc findtext Änderungen wurden verworfen" : "Search text missing. Example: /acc findtext changes were discarded";
+
+    /// <summary>/acc findtext while a search is still running.</summary>
+    public static string TextSearchBusy =>
+        IsGerman ? "Textsuche läuft noch." : "Text search still running.";
+
+    /// <summary>/acc findtext started.</summary>
+    public static string TextSearchStarted(string query) =>
+        IsGerman ? $"Suche in den Spieltexten nach: {query}. Das dauert einige Sekunden." : $"Searching game texts for: {query}. This takes a few seconds.";
+
+    /// <summary>/acc findtext finished and wrote its file.</summary>
+    public static string TextSearchDone(int hits, int sheets) =>
+        IsGerman
+            ? $"Textsuche fertig. {hits} Treffer in {sheets} Tabellen. Datei FFXIV_TextSearch auf dem Desktop."
+            : $"Text search done. {hits} hits in {sheets} sheets. File FFXIV_TextSearch on the desktop.";
+
+    /// <summary>/acc findtext finished but the desktop file could not be written.</summary>
+    public static string TextSearchFileError(int hits) =>
+        IsGerman ? $"Textsuche fertig, {hits} Treffer, nur im Dalamud-Log. Datei-Fehler." : $"Text search done, {hits} hits, only in the Dalamud log. File error.";
+
+    /// <summary>/acc findtext aborted by an exception.</summary>
+    public static string TextSearchFailed =>
+        IsGerman ? "Textsuche abgebrochen. Details im Log." : "Text search aborted. Details in the log.";
+
     public static string AddonNotOpen(string names) =>
         IsGerman ? $"Addon {names} nicht offen." : $"Addon {names} not open.";
 
