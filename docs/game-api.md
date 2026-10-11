@@ -3146,3 +3146,29 @@ Erkennung weiter nur über Spieldaten (ENpcBase.ENpcData), keine Namen.
 
 Offline-Zählung sqpack EN: +~186 NPCs nur über Indirection, ~666 schon direkt.
 
+
+## HUD-Fokus — Numpad1 = `PAD_HUDFOCUS` (531) (Messung 2026-10-11)
+
+Quelle: Keybind-Dump, Log 13:11-13:54, UI-Dumps, Disassembly ffxiv_dx11.exe 2026.09.15 (Capstone).
+
+- Numpad1 springt reihum durch genau diese Bereiche, Reihenfolge bei jeder Runde gleich:
+  `JobHudNotice` → `ScenarioTree` → `ChatLog` → `_ToDoList` → `_NaviMap` → von vorn.
+  `JobHudNotice` war ein Tutorial-Hinweis (Job-Symbol „Mönch“ + Comp id=4 Text id=2
+  „Chakra-Balken erweitert!“); Num0 öffnete `Guide` („JOB-BALKEN“), danach verschwand er.
+- Innerhalb eines Bereichs bewegen Num8/Num2 den Fokus, Num0 löst aus.
+- `ChatLog`: Fokus auf dem Eingabefeld (TextInput id=5) bzw. id=2, kein Text.
+- `ScenarioTree`: Überschrift Text id=11 („Aktueller Hauptszenario-Auftrag“, Addon 5671;
+  5670 „Nächster …“), Hauptszenario-Knopf id=13, Job-Quest-Knopf id=7 (id=8 zweiter, leer).
+  Num2 von 13 nach 7. Num0 auf beiden öffnet `AreaMap`.
+  `AgentScenarioTree.Instance()->Data`: `MainScenarioQuestIds`, `JobQuestIds`
+  (Quest-Sheet-Zeile = Id + 0x10000, Beleg 66600 „Ätherische Harmonie“, Mönch-Jobaufträge).
+- `_NaviMap` (OnSetup 0x141580FA0, ReceiveEvent 0x141581E10):
+  - CheckBox id=4: ButtonClick/MouseOver param 2. Tooltip = `StringArrayType.AreaMap[0]`
+    („Norden/Blickrichtung nach oben ausrichten“; zeigergleich mit Addon+0x3A18, Sonde 13:30/13:32).
+    Was „angehakt“ bedeutet: UNBELEGT.
+  - Button id=2 (oben) param 4 = Zoomwert Addon+0x3A78 hoch (Num0: 1,25 → 1,5),
+    Button id=3 (unten) param 3 = runter (1,5 → 1,25). Kein Text, kein Tooltip.
+  - Comp id=14 (Kollision id=5, fokussierbar), MouseOver param 5: Tooltip Addon+0x3A28 =
+    `StringArrayType.NaviMap[2]` = Wetter („Regnerisch“, zeigergleich belegt). NaviMap[0] = Kartendatei.
+- Mod (feature/hud-focus-regions): Bereichsname beim Betreten (Job-Hinweis, Szenario-Leitfaden,
+  Chat, Auftragsliste, Mini-Map), Mini-Map-Elemente und Leitfaden-Einträge benannt.
