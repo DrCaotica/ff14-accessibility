@@ -14,16 +14,22 @@
 //   CMD_LINKSHELL_1..8, each with an _ALWAYS variant). The mod was adding a second
 //   route to a control that was already reachable. Convenience.
 //
-//   This - switching the displayed TAB. The game has NO key for it. The full InputId
-//   command table was dumped and searched for LOG, TAB and CHAT (640 members,
+//   This - switching the displayed TAB. The game has no DEDICATED key for it. The full
+//   InputId command table was dumped and searched for LOG, TAB and CHAT (640 members,
 //   cross-checked against the live 679-entry keybind dump): TAB_NEXT/TAB_PREV are the
 //   generic UI-cursor tab cycle and are not proven to reach the chat log at all,
 //   CHATLOG_VIEWERMODE is unbound and is not tab switching, and there is no
 //   LOG_TAB_NEXT or CHATLOG_TAB_* of any kind, and there is no
-//   slash command either. A sighted player switches tabs by CLICKING the tab. So the
-//   control exists, the game offers it by mouse only, and a blind player has no way to
-//   reach it. Making it reachable is feature parity - the first coding principle in
-//   CLAUDE.md - not a second mechanism.
+//   slash command either. A sighted player switches tabs by CLICKING the tab.
+//
+//   CORRECTION 2026-10-11: the 2026-08-10 conclusion "a blind player has no way to
+//   reach it" is disproved. Once the HUD focus (Numpad1, PAD_HUDFOCUS) has put the
+//   cursor in the chat window, Numpad7 / Numpad9 switch the tab, wrapping round
+//   TabCount ([ChatProbe] 2026-10-11 14:07: TabIndex 0 -> 2 -> 0 of 3; in the message
+//   panel the game also moves the cursor back to the input field). So the game does
+//   offer a keyboard route - only through the HUD focus, not as a key of its own.
+//   This class is the mod's second route to the same control; whether it stays is
+//   the user's decision, not settled by this comment. See docs/game-api.md, HUD focus.
 //
 // WHAT IS CALLED, and why it is the game's own action rather than an imitation of one.
 // AddonChatLog.ChangeTab(int) is a member function of the chat log addon, located by
