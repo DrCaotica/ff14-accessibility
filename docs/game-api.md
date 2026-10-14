@@ -1604,6 +1604,79 @@ Quelle: FFXIVClientStructs `AddonCharacter` (ilspycmd lokal gegen Dalamud-DLL).
 - Plugin: `OnCharacterUpdate` — Fokus auf anderem Reiter → `SetTab`; Ansage
   bei TabIndex-Wechsel; generischer Fokus-Leser stumm auf den vier Radios
   (`IsOwnerNodeAncestorOf`).
+- Öffnen (Log 2026-10-06): das erste PostUpdate kommt ~50 ms VOR PostSetup.
+  Dann stehen `TabIndex`=0 / `TabCount`=3 (Vorgabe, nicht der echte Stand).
+  `OnCharacterUpdate` wartet deshalb auf `AtkUnitBase.IsReady` (ClientStructs:
+  "OnSetup was called", Flags1A1 Bit 0).
+
+#### Reiter-Inhalte: CharacterStatus / CharacterProfile / CharacterClass (2026-10-06)
+
+Quelle: Dumps `/acc dump` (Desktop\FFXIV_UI_Dump_Attribute/Profil/Klassen.txt),
+dalamud.log 2026-10-06 06:28–07:02, `NodeFlags` per ilspycmd aus FFXIVClientStructs.
+
+- Der Inhalt jedes Reiters ist ein EIGENES Addon unter `Character`:
+  Attribute = `CharacterStatus`, Profil = `CharacterProfile`,
+  Klassen/Jobs = `CharacterClass`, Ansehen = `CharacterRepute`. Es existiert nur
+  das Addon des offenen Reiters (`/acc dump` der anderen → „nicht offen“).
+  Strg+F5 dumpt nur `Character`, die Reiter-Addons brauchen `/acc dump <Name>`.
+- `NodeFlags` (ClientStructs): 0x10 = Visible, 0x100 = HasCollision,
+  0x400 = Focusable. 0x100 ist KEIN Fokus-Bit. In `CharacterStatus` tragen alle
+  22 Kollisionsknoten F=0x2733 – die Flags sagen nicht, welcher Eintrag gewählt
+  ist. Den echten Fokus trifft `UpdateGlobalFocus` (jeder Schritt im Log richtig).
+- Einträge, Knoten-Ids innerhalb der Komponente (flache NodeList):
+  - `CharacterStatus`, Comp CT=Base: Text id=2 Name, id=3 Wert, Collision id=4.
+  - `CharacterClass` Kampf/Magie/Sammler, Comp(1003) CT=Base: Text id=3 Name
+    (mit Leerzeichen am Ende, „Gärtner “), id=2 Stufe, Collision id=8.
+  - `CharacterClass` Handwerker, Comp(1001) CT=Button: Text id=3 Name (unter
+    Res id=2), id=5 Stufe, Collision id=12.
+  - Nicht freigeschaltete Klassen zeigen Stufe „0“.
+- `CharacterClass`: Umschaltknopf Comp id=2 (Button, Texte id=7
+  „Handwerker/Sammler“, id=6 „Krieger/Magier“) wechselt die sichtbare Gruppe.
+  Die versteckte Gruppe (Res id=69/81) und die Zeilen „Verwertungsgeschick“/
+  „Routine“ (Res id=97/91) haben kein Visible-Bit am ELTERNKNOTEN, ihre Texte
+  aber schon – `IsVisible()` am Textknoten allein reicht nicht.
+- `CharacterProfile`: per Cursor erreichbar sind nur zwei Knöpfe (Titel
+  „Andere Titel“, Comp id=7; Gesellschaft, Comp id=11). Namenstag,
+  Schutzgottheit usw. sind reine Textknoten. NUM8/NUM2 springen im Spiel NUR
+  zwischen diesen zwei Knöpfen hin und her (Log 2026-10-06 19:52, 24 Drücke).
+  - Zeilen (Res-Gruppe / Überschrift / Wert, flache NodeList des Addons):
+    Titel 2/3/6 (+ id=5, leer und versteckt), Staatl. Gesellschaft 8/9 und
+    Knopf id=11 mit Text id=4 Name, id=5 Rang, Freie Gesellschaft 12/13/16
+    (Gruppe versteckt ohne FC, gefüllt NICHT vermessen), Volk 17/18/20,
+    Anfangsstadt 21/22/25, Namenstag 26/27/29, Schutzgottheit 30/31/34.
+  - „Andere Titel“ ist ein Tooltip am Collision-Kind (id=3) von Comp id=7,
+    nicht am Komponentenknoten.
+  - Titel-Zeile zeigt den Charakternamen („Hagon Tusk“). Charakter ohne
+    erworbene Titel (Titelliste `CharacterTitle`: 1 Eintrag „(-)“, Log 20:12:16).
+    Wie die Zeile mit gesetztem Titel aussieht (id=5?), ist NICHT vermessen.
+  - `AtkUnitBase.SetFocusNode(collision, true)` setzt den Spielfokus hier
+    zuverlässig (ok=True, `AtkInputManager.FocusedNode` = Ziel, CursorTarget
+    bleibt 0); NUM0 drückt danach genau diesen Knopf (Rangfenster 20:06:14,
+    Titelliste 20:12:16).
+  - `KeyState[vk] = false` hält NUM8/NUM2 vom Spiel ab (kein Knopf-Hin-und-her
+    mehr während des Profil-Cursors, Test 2026-10-06 20:06-20:12).
+  - Plugin: `CharacterProfileHandler` (Num8/Num2 nur, solange der Spielfokus im
+    Reiter liegt; Umlauf; Num0 auf Textzeilen geschluckt).
+- Plugin: alle drei in `CharacterTabAddons` → `SpecialUpdateAddons` (kein
+  FindFocusedText) und keine Sammel-Ansage in `OnAnyAddonOpen`;
+  `TryReadCharacterTabFocusRow` liest Name + Wert per Id.
+
+#### Reiter Ansehen: CharacterRepute (2026-10-06)
+
+Quelle: Dumps `/acc dump CharacterRepute` (Desktop\FFXIV_UI_Dump_Zimmerer.txt /
+_Mönch.txt, identisch; Charakter ohne Freundesvölker).
+
+- Top-Level: Text id=3 „Ehrungen als wertvollster Spieler“, Comp id=5 (1012,
+  Base) mit Text id=5 = Anzahl („0“), Collision id=4, Symbol id=3.
+- Text id=10 „Verbundenheit mit den Freundesvölkern“, Text id=8
+  „Freundesvölker-Vollmachten“, Text id=9 Wert („0/0“).
+- Comp id=12 DropDownList (Auswahl Freundesvolk, leer, ListLen=0) und
+  Comp id=13 List (ListLen=0, 7 Renderer mit leeren Texten).
+- Beim Wechsel setzt das Spiel den Cursor auf „Weggesteckte Waffen/Werkzeuge
+  anzeigen“ im Hauptfenster (Log 17:58:33), nicht in den Reiter. Ob Einträge
+  des Reiters per Cursor erreichbar sind, ist nicht geprüft.
+- Plugin: leere Liste → `ReadEmptyCharacterRepute` statt „Keine Einträge“.
+  Gefüllte Liste (Freundesvölker freigeschaltet) NICHT vermessen.
 
 ### Rangfenster (`GrandCompanyRank`) — aus Profil (2026-09-20)
 

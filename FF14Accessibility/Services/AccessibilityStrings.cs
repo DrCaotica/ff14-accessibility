@@ -1644,6 +1644,15 @@ public static partial class AccessibilityStrings
     public static string CharacterTabHeader(string label, int index, int total) =>
         SocialTabHeader(label, index, total);
 
+    /// <summary>
+    /// Character window, reputation tab with no allied society unlocked:
+    /// commendations and allowances (labels from the window), then the empty list.
+    /// </summary>
+    public static string CharacterReputeEmpty(string mvpLabel, string mvpValue, string allowLabel, string allowValue) =>
+        IsGerman
+            ? $"{mvpLabel}: {mvpValue}. {allowLabel}: {allowValue}. Keine Freundesvölker."
+            : $"{mvpLabel}: {mvpValue}. {allowLabel}: {allowValue}. No allied societies.";
+
     /// <summary>Fallback when a Character tab radio has no readable label yet.</summary>
     public static string CharacterTabFallback(int zeroBasedIndex) => zeroBasedIndex switch
     {
@@ -1936,6 +1945,32 @@ public static partial class AccessibilityStrings
     /// same in both mod languages.
     /// </summary>
     public static string AmountWithLabel(string amount, string label) => $"{amount} {label}";
+
+    /// <summary>
+    /// Attribute entry in the character window: label first, then its value
+    /// ("Stärke 246"). Both parts come from the game in the client language,
+    /// so this format adds no words of its own.
+    /// </summary>
+    public static string LabelWithValue(string label, string value) => $"{label} {value}";
+
+    /// <summary>
+    /// One line of the character profile tab ("Anfangsstadt: Ul'dah",
+    /// "Staatliche Gesellschaft: Bruderschaft der Morgenviper, Zweiter Novize").
+    /// Heading and value both come from the game in the client language.
+    /// </summary>
+    public static string ProfileEntry(string heading, string value) => $"{heading}: {value}";
+
+    /// <summary>The profile cursor could not move the game's focus onto a button.</summary>
+    public static string ProfileFocusFailed => IsGerman
+        ? "Knopf konnte nicht angewählt werden."
+        : "Could not select the button.";
+
+    /// <summary>
+    /// Class entry in the character window ("Zimmerer, Stufe 7"). The level is
+    /// passed as the game shows it, not parsed.
+    /// </summary>
+    public static string ClassWithLevel(string name, string level) =>
+        IsGerman ? $"{name}, Stufe {level}" : $"{name}, level {level}";
 
     // ── Belohnungs-Zeile (JournalResult) ─────────────────────────────
     // Currency type is only a UI image, so the mod labels amounts by position.
