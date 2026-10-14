@@ -1989,7 +1989,7 @@ public static partial class AccessibilityStrings
         $"{label}. {description}";
 
     /// <summary>The tooltip description spoken on its own after the focus has
-    /// dwelled on an inventory item (the name was already announced when the
+    /// dwelled on an inventory item or a character attribute (the name was already announced when the
     /// focus landed) - prefixed so the user knows what is being read.</summary>
     /// <summary>Spoken when a skill carries no tooltip text in the sheets -
     /// without it the numpad-5 description key would look like a stuck menu.</summary>

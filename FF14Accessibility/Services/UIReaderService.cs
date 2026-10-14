@@ -3728,6 +3728,16 @@ public sealed partial class UIReaderService : IDisposable
     private long _settingHelpTick;       // Stopwatch timestamp the focus reached it
     private bool _settingHelpSpoken;     // help already queued for this dwell?
 
+    // Charakterfenster, Reiter Attribute: Name und Wert kommen sofort, die
+    // Erklaerung des Attributs erst nach kurzem Verweilen (Wunsch des Users
+    // 2026-10-10, wie die Gegenstandsbeschreibung im Inventar). Die Erklaerung
+    // ist der Tooltip, den das Spiel beim Aufbau des Fensters an jeden Eintrag
+    // bindet - siehe TooltipService (Sonde 2026-07-20: alle 22 Attribute).
+    private nint _attributeHelpOwner;      // focused attribute row node (0 = none)
+    private nint _attributeHelpDwellOwner; // node the dwell clock is timing
+    private long _attributeHelpTick;       // Stopwatch timestamp the focus reached it
+    private bool _attributeHelpSpoken;     // description already queued for this dwell?
+
     public unsafe void UpdateGlobalFocus(bool navKeyHeld = false)
     {
         if (IsShopQuantityEditing || IsTableReading) return;
@@ -3916,19 +3926,8 @@ public sealed partial class UIReaderService : IDisposable
         // on a duty-finder setting, so leaving that window ends the help dwell by
         // itself instead of leaving a stale control behind.
         _settingHelpOwner = 0;
-        if (TryReadArmouryFilterFocus(node, out var armouryFilter))
-        {
-            text = armouryFilter;
-        }
-        else if (TryReadCharacterStat(node, out var statText))
-        {
-            text = statText;
-        }
-        else if (TryReadShopQuantityFocus(node, out var quantityText))
-        {
-            text = quantityText;
-        }
-        else if (TryReadContentsFinderSettingRow(node, out var dutySetting))
+        _attributeHelpOwner = 0;
+        if (TryReadContentsFinderSettingRow(node, out var dutySetting))
         {
             // Einstellungen der Inhaltssuche: Name UND Zustand ("Keine
             // Beschraenkungen, Schalter, aus"). Vor dem allgemeinen Pfad, der
@@ -4258,6 +4257,7 @@ public sealed partial class UIReaderService : IDisposable
         // Deferred help text of a duty-finder setting - same reason it runs
         // before the dedup return as the two dwells above.
         HandleSettingHelpDwell();
+        HandleAttributeHelpDwell();
 
         // Dedup on the text WITHOUT its running clocks. Straight text comparison
         // let a levequest objective read itself out once per second: the tracker
@@ -6533,7 +6533,53 @@ public sealed partial class UIReaderService : IDisposable
         else text = isStatus
             ? AccessibilityStrings.LabelWithValue(name, value)
             : AccessibilityStrings.ClassWithLevel(name, value);
+
+        // Die Erklaerung des Attributs gehoert zum selben Fokuswechsel, kommt
+        // aber erst beim Verweilen (HandleAttributeHelpDwell).
+        if (isStatus) _attributeHelpOwner = (nint)node;
         return true;
+    }
+
+    /// <summary>
+    /// Speaks the explanation of the focused attribute once the focus has stayed
+    /// on it for <see cref="ActionDescDwellSeconds"/> - mirrors
+    /// <see cref="HandleSettingHelpDwell"/>. The text is the game's own tooltip
+    /// for the row, taken from <see cref="TooltipService"/>; nothing is spoken
+    /// when the game bound none.
+    /// </summary>
+    private unsafe void HandleAttributeHelpDwell()
+    {
+        var owner = _attributeHelpOwner;
+        if (owner == 0)
+        {
+            _attributeHelpDwellOwner = 0;
+            return;
+        }
+
+        if (owner != _attributeHelpDwellOwner)
+        {
+            _attributeHelpDwellOwner = owner;
+            _attributeHelpTick       = System.Diagnostics.Stopwatch.GetTimestamp();
+            _attributeHelpSpoken     = false;
+            return;
+        }
+
+        if (_attributeHelpSpoken) return;
+        var elapsed = (double)(System.Diagnostics.Stopwatch.GetTimestamp() - _attributeHelpTick)
+                      / System.Diagnostics.Stopwatch.Frequency;
+        if (elapsed < ActionDescDwellSeconds) return;
+
+        _attributeHelpSpoken = true; // one-shot per dwell, even when there is no text
+        // owner was set from the focused node in THIS frame (cleared every frame
+        // in UpdateGlobalFocus), so the pointer is live.
+        var help = _tooltips.TryGetTooltipDeep((AtkResNode*)owner)?.Trim() ?? string.Empty;
+        if (help.Length == 0)
+        {
+            _log.Info($"[AttrHelp] kein Tooltip am Knoten 0x{owner:X} oder seinen Eltern.");
+            return;
+        }
+        _log.Info($"[AttrHelp] '{help}'");
+        _tolk.Speak(AccessibilityStrings.ItemDescription(help));
     }
 
     /// <summary>
