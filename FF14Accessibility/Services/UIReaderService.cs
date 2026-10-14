@@ -752,6 +752,9 @@ public sealed partial class UIReaderService : IDisposable
         // die Auszahlungstabelle (Log 2026-09-26).
         _addonLifecycle.RegisterListener(AddonEvent.PostSetup, "LotteryDaily", OnLotteryDailyOpen);
 
+        // Laden: Hinweis auf das Mengenfeld, einmal je geoeffnetem Fenster.
+        _addonLifecycle.RegisterListener(AddonEvent.PostSetup, "Shop", OnShopOpen);
+
         // -- SelectString / SelectIconString ----------------------
         foreach (var name in SelectStringAddons)
             _addonLifecycle.RegisterListener(AddonEvent.PostSetup, name, OnSelectStringOpen);
@@ -3667,6 +3670,17 @@ public sealed partial class UIReaderService : IDisposable
             // Zellen/Reihen ueber AddonLotteryDaily.GameBoard / LaneSelector.
             text = miniLotteryRow;
         }
+        else if (TryReadShopQuantityFocus(node, out var shopQuantity))
+        {
+            // Mengenfeld einer Laden-Zeile: der allgemeine Pfad sagte nur die
+            // nackte Ziffer ("4", im Zehner-Modus "04") - ohne zu sagen, WAS die
+            // Zahl ist und welche Stelle sich gerade aendert (User 2026-10-05).
+            // Das Feld liegt IN der Zeile, die oben schon als Ware verknuepft
+            // wurde - ohne das Abschalten kaeme hinter der Menge noch die
+            // Gegenstandsbeschreibung, bei jedem Besuch des Feldes.
+            text = shopQuantity;
+            _shopRowItemActive = false;
+        }
         else if (TryReadCurrencyFocusRow(node, out var currencyRow))
         {
             // Vermoegen: die Zeile sagt jetzt, WELCHE Waehrung sie ist. Vor dem
@@ -3690,6 +3704,15 @@ public sealed partial class UIReaderService : IDisposable
             // omits. Ranked first so an icon-only tab never falls into the item
             // resolver (which would announce "Leer").
             text = configRow;
+        }
+        else if (ArmouryTabText.TryDescribe(node, FindAddonNameForNode(node), _data, out var armouryTab, out var armouryCount))
+        {
+            // Armoury category buttons: icon-only, they were silent under focus
+            // and sounded like empty slots that failed to speak (user 2026-10-04).
+            // The item count is the number drawn on the button.
+            text = armouryCount.Length > 0
+                ? AccessibilityStrings.CategoryLabelWithCount(armouryTab, armouryCount)
+                : AccessibilityStrings.CategoryLabel(armouryTab);
         }
         else if (TryReadMountNoteBookFocusRow(node, out var mountRow))
         {
@@ -4068,6 +4091,9 @@ public sealed partial class UIReaderService : IDisposable
             // weil in einem Tauschfenster der Preis die Entscheidung traegt und
             // die Werte nur die Zugabe sind.
             text = AppendShopPrice(text);
+            // Die Menge direkt hinter Preis und Name - vor der Gear-Info, weil der
+            // Preis der Zeile dann fuer GENAU so viele Stueck gilt.
+            text = AppendShopRowQuantity(node, text);
             // Item-Slot-Texte tragen die Gear-Info schon (ResolveFocusedItemName);
             // rohe Fokus-Texte (Laden-Zeilen) bekommen sie hier angehaengt.
             if (string.IsNullOrEmpty(_lastFocusedItemName)) text = AppendShopGearInfo(text);
@@ -4085,7 +4111,112 @@ public sealed partial class UIReaderService : IDisposable
             // from ContextMenu "Anlegen" restored this slot and wiped the
             // reason — log 2026-09-28 09:16:00 / 09:19:58).
             _tolk.SpeakFocusInterrupt(text, (nint)node);
+            MaybeSpeakShopQuantityHint(node);
         }
+    }
+
+    // -- Laden: Mengenfeld ----------------------------------------------------
+
+    /// <summary>Set when a gil shop window opens, cleared once its quantity hint
+    /// has been spoken - so the hint comes once per visit, not on every row.</summary>
+    private bool _shopQuantityHintPending;
+
+    private void OnShopOpen(AddonEvent type, AddonArgs args) => _shopQuantityHintPending = true;
+
+    /// <summary>
+    /// After the first row of a freshly opened shop: where the quantity field is.
+    /// Queued, not interrupting, so the row itself is heard first. Only when the
+    /// focused row really HAS a quantity field - the buyback list of the same
+    /// window does not.
+    /// </summary>
+    private unsafe void MaybeSpeakShopQuantityHint(AtkResNode* node)
+    {
+        if (!_shopQuantityHintPending) return;
+        var row = FindShopRow(node);
+        if (row == null || FindNumericInput(((AtkComponentNode*)row)->Component) == null) return;
+        if (FindAddonNameForNode(node) != "Shop") return;
+
+        _shopQuantityHintPending = false;
+        _tolk.Speak(AccessibilityStrings.ShopQuantityHint);
+    }
+
+    /// <summary>
+    /// The quantity field of a gil shop row (Shop, dump 2026-10-05: a
+    /// NumericInput, node id=4, in every buy row, default 1, max 99).
+    ///
+    /// Measured with [ShopQtyProbe] 2026-10-05 19:45: NUM4 from the row puts the
+    /// focus on the field (id=5 inside the NumericInput, IsActive false); NUM0
+    /// starts editing (focus id=9, IsActive true) and NUM0 again ends it. The
+    /// chosen amount stays in the field, and confirming on the ROW then asks for
+    /// exactly that many ("3 Heiltränke für 84 Gil kaufen?", 19:51:40).
+    /// Value and editing state are read from the component, never from its
+    /// text, which is zero-padded while the tens digit is being edited ("04").
+    /// CurrentDigitMultiplier is 1 on the ones and 10 on the tens digit
+    /// (log 2026-10-05 20:01:35-37, switching back and forth while editing).
+    /// </summary>
+    private unsafe bool TryReadShopQuantityFocus(AtkResNode* node, out string text)
+    {
+        text = string.Empty;
+        if (node == null) return false;
+
+        AtkComponentNumericInput* input = null;
+        var cur = node->ParentNode;
+        for (var up = 0; up < 2 && cur != null && input == null; up++, cur = cur->ParentNode)
+        {
+            if ((int)cur->Type < 1000) continue;
+            var comp = ((AtkComponentNode*)cur)->Component;
+            if (comp != null && comp->GetComponentType() == ComponentType.NumericInput)
+                input = (AtkComponentNumericInput*)comp;
+        }
+        if (input == null || FindShopRow(node) == null || FindAddonNameForNode(node) != "Shop") return false;
+
+        text = input->IsActive
+            ? AccessibilityStrings.ShopQuantityEditing(input->Value, input->CurrentDigitMultiplier)
+            : AccessibilityStrings.ShopQuantityField(input->Value);
+
+        var raw = $"value={input->Value} aktiv={input->IsActive} stelle={input->CurrentDigitMultiplier}";
+        if (raw != _lastShopQuantityRaw)
+        {
+            _lastShopQuantityRaw = raw;
+            _log.Info($"[Shop] Mengenfeld {raw}");
+        }
+        return true;
+    }
+
+    private string _lastShopQuantityRaw = string.Empty;
+
+    /// <summary>
+    /// Appends ", Menge 4" to a gil shop row whose quantity field holds more
+    /// than 1. A sighted player sees the number next to the price; without it
+    /// the row said only "112, Heiltrank" - the TOTAL for 4, which reads like
+    /// the price of one (user 2026-10-05). At 1 it stays silent: that is the
+    /// default on every row, and saying it on each would only be noise.
+    /// </summary>
+    private unsafe string AppendShopRowQuantity(AtkResNode* node, string text)
+    {
+        // Set only for a row linked to an item, and cleared on the quantity field
+        // itself, which already says its number.
+        if (!_shopRowItemActive || string.IsNullOrEmpty(text)) return text;
+
+        var row = FindShopRow(node);
+        if (row == null) return text;
+        var input = FindNumericInput(((AtkComponentNode*)row)->Component);
+        if (input == null || input->Value <= 1 || FindAddonNameForNode(node) != "Shop") return text;
+
+        return text + AccessibilityStrings.ShopRowQuantity(input->Value);
+    }
+
+    /// <summary>The first NumericInput among a component's direct children, or null.</summary>
+    private static unsafe AtkComponentNumericInput* FindNumericInput(AtkComponentBase* comp)
+    {
+        for (var i = 0; comp != null && i < comp->UldManager.NodeListCount; i++)
+        {
+            var child = comp->UldManager.NodeList[i];
+            if (child == null || (int)child->Type < 1000) continue;
+            var c = ((AtkComponentNode*)child)->Component;
+            if (c != null && c->GetComponentType() == ComponentType.NumericInput) return (AtkComponentNumericInput*)c;
+        }
+        return null;
     }
 
     // -- Charaktererstellung: Auswahl folgt dem Fokus (V4.93) ----------------
@@ -4887,11 +5018,12 @@ public sealed partial class UIReaderService : IDisposable
                 if (comp == null) return string.Empty;
 
                 // Character window: the slot's own name comes first ("Kopf, ..."),
-                // and an empty slot says so instead of falling silent. Its icon
-                // is a silhouette (uint.MaxValue), which the empty check below
-                // never matched. See CharacterEquipSlot.
+                // and an empty slot says so instead of falling silent - its icon is
+                // a silhouette (uint.MaxValue), which the empty check below never
+                // matched. See CharacterEquipSlot for how the slot is identified.
                 var isCharacterSlot = CharacterEquipSlot.TryDescribe(cur, FindAddonNameForNode(cur), _data, _log,
-                    out var characterSlotName, out var characterEmpty, out var characterWear);
+                                                                     out var characterSlotName, out var characterEmpty,
+                                                                     out var characterWear);
                 if (isCharacterSlot && characterEmpty.Length > 0)
                 {
                     _log.Info($"[CharSlot] '{characterSlotName}' leer");
@@ -4994,8 +5126,8 @@ public sealed partial class UIReaderService : IDisposable
                 // Category and item level for EVERY item ("Baustein,
                 // Gegenstandsstufe 1") - the tooltip lines a sighted player
                 // reads while the cursor sits on the slot.
-                // Not in the Character window: there the slot name already says
-                // the category, and "Kopf, Leinenturban, Kopf" would say it twice.
+                // Not in the Character window, though: there the slot name already
+                // says it, and "Kopf, Leinenturban, Kopf" would say it twice.
                 var basics = isCharacterSlot ? string.Empty : _gearInfo.DescribeItemBasics(itemId);
 
                 // Equipment gets level + wearability appended ("Bronzegladius,
@@ -5013,11 +5145,15 @@ public sealed partial class UIReaderService : IDisposable
                 // Prepend the stack count so the user hears "10 mal Eichenholz".
                 var qty = ReadIconQuantity(icon);
 
-                // Condition and spiritbond come from the item instance, never from
-                // the tooltip text, which trails the cursor. See ItemWearText.
-                // The worn slot, the sort-mapped owned slot, then the hover hook,
-                // then the single owned copy. Several copies and no resolved
-                // instance stay silent: the item id cannot say which copy it is.
+                // Condition and spiritbond - the lines of the tooltip that cannot
+                // be worked out from anything else on the slot (user 2026-09-12,
+                // armoury chest; 2026-10-04: a bare percentage did not say WHICH of
+                // the two it was). Always read from the item INSTANCE, never from
+                // the tooltip text, which trails the cursor - see ItemWearText.
+                // The instance comes from the worn slot in the Character window,
+                // otherwise from the game's own hover resolve; failing both, from
+                // the single owned copy - and stays silent when there are several,
+                // because the item id cannot say which copy the cursor is on.
                 var condition       = string.Empty;
                 var conditionSource = "-";
                 if (isCharacterSlot)
@@ -5027,14 +5163,11 @@ public sealed partial class UIReaderService : IDisposable
                 }
                 else if (agentItemId != 0)
                 {
-                    var instance = ItemSlotService.InstanceAt(owned);
-                    conditionSource = instance != null ? "owned" : "hover";
-                    if (instance == null)
-                        instance = _itemSlots.TryGetHoveredInstance(itemId);
+                    var instance = _itemSlots.TryGetHoveredInstance(itemId);
+                    conditionSource = "hover";
                     if (instance == null)
                     {
-                        instance = _inventory.FindSingleOwnedInstance(
-                            itemId, ItemSlotService.IsHighQuality(icon->IconId));
+                        instance = _inventory.FindSingleOwnedInstance(itemId, ItemSlotService.IsHighQuality(icon->IconId));
                         conditionSource = instance != null ? "inventory" : "none";
                     }
                     condition = ItemWearText.Describe(instance, _data, _log);
@@ -15665,6 +15798,7 @@ public sealed partial class UIReaderService : IDisposable
         _addonLifecycle.UnregisterListener(AddonEvent.PostUpdate, "Buddy", OnBuddyUpdate);
         _addonLifecycle.UnregisterListener(AddonEvent.PostUpdate, "BuddySkill", OnBuddySkillUpdate);
         _addonLifecycle.UnregisterListener(AddonEvent.PostSetup, "LotteryDaily", OnLotteryDailyOpen);
+        _addonLifecycle.UnregisterListener(AddonEvent.PostSetup, "Shop", OnShopOpen);
         _addonLifecycle.UnregisterListener(AddonEvent.PostUpdate, "Character", OnCharacterUpdate);
         _addonLifecycle.UnregisterListener(AddonEvent.PostUpdate, "MountNoteBook", OnMountNoteBookUpdate);
         _addonLifecycle.UnregisterListener(AddonEvent.PostUpdate, "JournalDetail", OnQuestWindowUpdate);

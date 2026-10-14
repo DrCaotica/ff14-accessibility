@@ -218,30 +218,24 @@ public sealed class GearInfoService
     /// <summary>
     /// Gear info for a UI text that IS an equipment name (a shop row lists
     /// only name and price). "" when the text is no known equipment name.
+    ///
+    /// Leads with the item category, which for armour is the slot the piece
+    /// goes on ("Kopf", "Rumpf", "Hände"): a sighted player reads it off the
+    /// tooltip, and in a shop list it is the one thing the name often does not
+    /// give away (user request 2026-10-05). Same source and same order as the
+    /// inventory slots (<see cref="DescribeItemBasics"/>, then
+    /// <see cref="DescribeGear"/>).
     /// </summary>
     public string DescribeByName(string text)
     {
         if (string.IsNullOrWhiteSpace(text)) return string.Empty;
-        RefreshGearNames();
+        _gearNames ??= BuildGearNameCache();
         if (!_gearNames.TryGetValue(text.Trim().ToLowerInvariant(), out var id)) return string.Empty;
 
-        // Category first. For armour that is the slot ("Kopf"), which a shop row
-        // does not put in the item name. Same order as an inventory slot:
-        // DescribeItemBasics, then DescribeGear.
         var basics = DescribeItemBasics(id);
-        var gear = DescribeGear(id);
+        var gear   = DescribeGear(id);
         if (basics.Length == 0) return gear;
         return gear.Length > 0 ? $"{basics}, {gear}" : basics;
-    }
-
-    /// <summary>Known equipment label with slots, resolved before translating.</summary>
-    public string ItemLabelByName(string text)
-    {
-        if (string.IsNullOrWhiteSpace(text)) return text;
-        RefreshGearNames();
-        return _gearNames.TryGetValue(text.Trim().ToLowerInvariant(), out var id)
-               && _data.GetExcelSheet<LuminaItem>().TryGetRow(id, out var row)
-            ? EquipmentSpeech.Name(_data, row) : text;
     }
 
     // ── Tragbarkeits-Prüfung ──
@@ -382,16 +376,20 @@ public sealed class GearInfoService
         foreach (var job in _data.GetExcelSheet<ClassJob>())
         {
             if (job.RowId == 0) continue;                       // "Abenteurer" is no class
+
+            // Unnamed rows are placeholders, not classes: rows 44 and 45 carry no
+            // name and no abbreviation, yet ExpArrayIndex 0 - the pugilist/monk
+            // level (offline sqpack 2026-10-06). Checked before the level lookup,
+            // or a monk "owns" them and AllowsJob warns about a missing column.
+            var name = job.Name.ExtractText().Trim();
+            if (name.Length == 0) continue;
+
             var index = job.ExpArrayIndex;
             if (index < 0 || index >= levels.Length) continue;
             if (levels[index] <= 0) continue;                   // not one of the player's
             if (AllowsJob(cat, (byte)job.RowId) != true) continue;
 
-            // Russisch zuerst: das ClassJob-Blatt liefert hier Englisch, das
-            // Spiel zeigt aber den uebersetzten Namen - gemeldet am 2026-09-14
-            // ("gladiator" statt "Гладиатор"). Unbekannte Id -> Blattname.
-            var name = RussianGameText.Name(_data, job, x => x.Name).Trim();
-            if (name.Length > 0) names.Add(name);
+            names.Add(name);
         }
 
         if (names.Count == 0) return string.Empty;

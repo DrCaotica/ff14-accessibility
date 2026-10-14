@@ -2087,6 +2087,12 @@ AtkValues, nicht in den Textknoten.
   „Slot: Body", „Gathering +32", „Lv. 27"). Sie werden woertlich weitergereicht.
 - FALLE: `EquippableBy` liefert bei Waffen die ABKUERZUNGSLISTE („ARC BRD"), die ein
   Screenreader buchstabiert. Dafuer gibt es `GearInfoService.DescribeOwnClasses`.
+- FALLE (offline sqpack 2026-10-06): Das `ClassJob`-Sheet hat 46 Zeilen. 1-43 sind
+  echte Klassen (bis BST), **44 und 45 sind leer** (kein Name in de/en, keine
+  Abkuerzung, Parent 0, JobIndex 0) — aber `ExpArrayIndex = 0`, also der Index von
+  Faustkaempfer/Moench. Wer Zeilen nur ueber `ClassJobLevels[ExpArrayIndex] > 0`
+  als "eigene Klasse" erkennt, haelt sie bei jedem Moench fuer besessen (Log:
+  „Keine Job-Spalte '' (Job 44/45)"). Deshalb Zeilen ohne Namen vorher ueberspringen.
 - **Fuer die BONI (Staerke, Geschick, Kritische Trefferwertung …) gibt es KEINEN
   Unterschied im Fenster.** Jeder Block fuehrt nur seine EIGENE Liste als fertige
   Zeichenketten in `BonusStats[0..7]`, Form `"<Name> +<N>"`, Name auch mehrwortig
@@ -3184,88 +3190,49 @@ Erkennung weiter nur über Spieldaten (ENpcBase.ENpcData), keine Namen.
 
 Offline-Zählung sqpack EN: +~186 NPCs nur über Indirection, ~666 schon direkt.
 
-## Sortierte Taschen/Arsenal: Anzeige-Position ≠ Container-Platz (gemessen 2026-10-05, PR 34)
+
+## Sortierte Taschen/Arsenal: Anzeige-Position ≠ Container-Platz (gemessen 2026-10-05)
 
 - Die Reihenfolge im Fenster kommt aus `ItemOrderModule` (`ItemOrderModule.Instance()`),
   je Behälter ein `ItemOrderModuleSorter`: `InventorySorter`, `ArmourySorter[12]`
   (`ArmouryMainHandSorter` … `ArmourySoulCrystalSorter`), Satteltaschen, Gehilfen.
 - `Sorter->Items[anzeigeIndex]` → `ItemOrderModuleSorterItemEntry { Page, Slot, Index }`.
   Im Arsenal ist `Page` 0 und `Slot` der echte Container-Platz (`ItemsPerPage` 35, Haupthand 50).
-- Unsortiert ist das die Identität. Nach `/sort def Beine ggstufe abs` + `/sort los Beine`:
-  11 von 35 Einträgen verschoben (PR 34, Sonde wieder entfernt).
-- `AgentItemDetail.Index` ist der Anzeige-Index, nicht der Platz.
-  `AgentItemDetail.OnItemHovered` liefert Container und Platz. Gemessen: bei 12
-  Fokuswechseln gleich dem Sorter-Eintrag, zwei gleiche Hosen getrennt.
-- Hier liest der Fokus die Instanz zuerst über die Sortierkarte des eigenen Slots
-  (`ItemSlotService.InstanceAt`), sonst über den Hover-Hook, sonst über das einzige
-  eigene Exemplar. Zustand und Bindung kommen von dieser Instanz (`ItemWearText`),
-  nicht aus dem Tooltip-Text, der dem Cursor hinterherhinkt.
+- Unsortiert ist das die Identität (Log: `nonIdentity=0` in allen Kategorien). Nach
+  `/sort def Beine ggstufe abs` + `/sort los Beine`: 11 von 35 Einträgen verschoben.
+- `AgentItemDetail.Index` = Anzeige-Index (nicht Platz!). `AgentItemDetail.OnItemHovered`
+  liefert dagegen den echten Container + Platz: bei allen 12 Fokuswechseln gleich dem
+  Sorter-Eintrag am Anzeige-Index, zwei gleiche Hosen sauber getrennt. Darum liest
+  `ItemSlotService` die Instanz nur über diesen Hook, nie über einen Index.
 
 ### `/sort` im deutschen Client
 
 - Befehl: `/sort` = `/sortieren` = `/itemsort` = `/isort` (Sheet `TextCommand` Zeile 210).
-- Die erlaubten Wörter stehen in Sheet `TextCommandParam`, nicht im Hilfetext:
-  `def`/`condition`, `los`/`execute`, `zurück`/`clear`, `ggstufe`, `aufs`/`asc`, `abs`/`des`.
-- Der Hilfetext nennt „aufsteigend, absteigend“. Das Spiel lehnt die ausgeschriebenen
+- Die erlaubten Wörter stehen in Sheet `TextCommandParam`, NICHT im Hilfetext:
+  `def`/`condition` (253/252), `los`/`execute` (251/250), `zurück`/`clear`,
+  `ggstufe` (267), `aufs`/`asc` (281/280), `abs`/`des` (283/282).
+- Der Hilfetext nennt „aufsteigend, absteigend“ – das Spiel lehnt die ausgeschriebenen
   Wörter ab (getestet 2026-10-05). Ohne Reihenfolge-Wort sortiert es aufsteigend.
-- Sortieren ändert nur die Anzeige-Reihenfolge.
+- Kategorie „Beine“ wird angenommen (getestet), steht aber nicht in `TextCommandParam`.
+- Sortieren ändert nur die Anzeige-Reihenfolge, nichts wird abgelegt. Die alte
+  Reihenfolge kommt nicht zurück.
 
-## Charakterfenster und Händler (PR 34, auf den Stand von PR 31 gesetzt)
+## Händler (Gil-Laden, Addon `Shop`): Menge und Gegenstandsart (gemessen 2026-10-05)
 
-- `AddonCharacter` hat kein Slot-Array. Der DragDrop-Param nennt den Platz:
-  Param 1–5 = Container 0–4, Param 6–13 = Container 6–13. Container 5 ist der
-  abgeschaffte Gürtel. Leeres Icon ist `uint.MaxValue`, nicht 0. Namen aus
-  Addon-Zeilen 738–751, „Leer“ aus Zeile 4947.
-- Zustand nur bei `ClassJobRepair != 0`, Bindung nur bei `MaterializeType != 0`.
-  Beschriftung Addon 498/499. Bindung Rohwert 0–10000, Nachkommastellen abgeschnitten.
-  Unter 1 % zeigt das Spiel „1 %“ (eine Messung, im Code als WORKAROUND).
-- Arsenal-Kategorieknöpfe spricht dieser Stand nicht extra: PR 31 ersetzt das
-  Blättern dort durch die Arsenalliste. Beim Kategoriewechsel (7/9) sagt die
-  Liste „Kategorie: Name, Anzahl“.
-
-## Gesprochenes Inventar: Kontextmenü (2026-10-06)
-
-- Strg+F3 bleibt die Kategorienliste (`Item.ItemUICategory`). Gil liest nur
-  den Betrag. Eine Kategorie öffnet die Gegenstände. Num4 geht zurück.
-- Num0 auf einem Gegenstand ruft `AgentInventoryContext.OpenForItemSlot`
-  mit dem physischen Container und Slot aus `IGameInventory.GetInventoryItems`
-  auf. Das ist der Index im Behälter, nicht die Anzeigeposition von
-  `ItemOrderModule`. `a4` bleibt 0, wie bei Arsenalliste und Sammeltransfer.
-- Besitzerfenster: sichtbares Addon `Shop`, sonst sichtbares
-  `Inventory` / `InventoryLarge` / `InventoryExpansion`. Ein verstecktes
-  Inventar-Addon nimmt `OpenForItemSlot` an und zeichnet kein Menü
-  (dalamud.log 2026-10-06 23:34, owner 16, `bagVisible=False`; dasselbe
-  Fach mit sichtbarem Shop um 23:35 zeichnete `ContextMenu`).
-- Ist keines dieser Fenster sichtbar, ruft das Plugin
-  `UIModule.ExecuteMainCommand(10)` auf. Zeile 10 im Blatt `MainCommand`
-  dieser Installation (sqpack 2026-10-06) heißt englisch „Inventory“ und
-  deutsch „Inventar“, Kategorie 1. Das ist derselbe Weg wie die Taste I.
-  Der Befehl wird einmal gesendet, weil er umschaltet. Das Menü gilt erst
-  als offen, wenn das Addon `ContextMenu` sichtbar ist. Nur das
-  Gil-Shop-Fenster liefert die Verkaufszeile. SpecialShop, Marktbrett und
-  Gehilfe sind nicht dieser Weg.
-- Das Plugin klickt keine Zeile. Menge und Ja/Nein bleiben die vorhandenen
-  Leser. Die öffnende Num0 (und Num6 / Rechts, falls die das Menü bestätigt
-  haben) wird bis zum Loslassen aus dem Tastenstatus genommen.
-- Die Übergabe `Request` liest bei Strg+F3 weiter die Abgabe-Gitter.
-
-## Arsenal nach Klassen (2026-10-06)
-
-- Die geöffnete Arsenaltruhe spricht zuerst die Klassen, in denen etwas liegt.
-  Die Gruppe ist eine Zeile `Item.ClassJobCategory`. Ein Teil, das mehrere
-  Klassen tragen können, bleibt in dieser einen Zeile.
-- Ein Satzname („All Classes“, „Disciple of War“, „Tank (excluding limited jobs)“)
-  kommt aus dem Blatt der Ansagesprache. Deutsch, sqpack 2026-10-06:
-  „Alle Klassen“, „Krieger“, „Verteidiger (außer beschränkte Jobs)“.
-- Eine Abkürzungsliste („GLA MRD PLD“) wird nicht vorgelesen. Die deutschen
-  Kürzel sind andere Zeichen (deutsch SCH = Schurke, englisch SCH = Gelehrter).
-  Die erlaubten Jobs kommen aus den bool-Spalten und heißen mit `ClassJob.Name`.
-- 0 öffnet die Klasse. In der Klasse öffnet 0 das Spielmenü derselben Zelle.
-  Plus (`VK_ADD`, mit und ohne NumLock) geht zurück zu den Klassen. 4 und 6
-  bleiben der vorige und der nächste Gegenstand. 7 und 9 springen innerhalb
-  der Klasse zur vorigen oder nächsten Ausrüstungsart. Entf schließt die Truhe.
-- Die Gegenstände in der Truhe werden nicht verschoben.
-- Händler-Menge spricht der Editor aus PR 31 (`ShopQuantityEdit`). Die
-  Gegenstandsart der Zeile kommt zusätzlich aus `DescribeItemBasics`
-  (`Item.ItemUICategory`), für Rüstung also der Slot.
-
+- Jede Kaufzeile (ListItemRenderer in Liste id=16) hat: Text id=3 Name,
+  `NumericInput` id=4 Menge (Standard 1, max 99), Text id=6 Preis, Text id=8
+  eine zweite Zahl (vermutlich Bestand, NICHT geprüft). Die Rückkauf-Liste
+  (id=17) hat kein Mengenfeld.
+- Der Preis in der Zeile ist der GESAMTPREIS für die eingestellte Menge
+  (Menge 4 bei 28 Gil → „112, Heiltrank“).
+- Tasten (Log 19:45–19:51): NUM4 von der Zeile → Mengenfeld (Fokus id=5,
+  `IsActive` false); NUM0 → Bearbeiten (Fokus id=9, `IsActive` true); NUM0
+  erneut → Bearbeiten beenden, Menge bleibt in der Zeile. NUM6 zurück auf die
+  Zeile, NUM0 dort → SelectYesno „3 Heiltränke für 84 Gil kaufen?“.
+- Beim Bearbeiten: `CurrentDigitMultiplier` 1 = Einer, 10 = Zehner. Der Text
+  ist im Zehner-Modus zweistellig („04“), darum `Value` lesen, nicht den Text.
+  Zehnerschritte laufen um: unter 1 → 99, über 99 → 1.
+- Gegenstandsart = `Item.ItemUICategory.Name`, für Rüstung der Slot
+  („Kopf“, „Rumpf“, „Hände“, „Beine“, „Füße“, „Ring“ …). Umgesetzt in
+  `GearInfoService.DescribeByName`; Mengenfeld/Hinweise in `UIReaderService`
+  (`TryReadShopQuantityFocus`, `AppendShopRowQuantity`).
