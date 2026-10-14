@@ -3208,48 +3208,13 @@ Erkennung weiter nur über Spieldaten (ENpcBase.ENpcData), keine Namen.
 Offline-Zählung sqpack EN: +~186 NPCs nur über Indirection, ~666 schon direkt.
 
 
-## Sortierte Taschen/Arsenal: Anzeige-Position ≠ Container-Platz (gemessen 2026-10-05)
+## Titelbildschirm: _TitleMenu und _TitleRevision (2026-10-10)
 
-- Die Reihenfolge im Fenster kommt aus `ItemOrderModule` (`ItemOrderModule.Instance()`),
-  je Behälter ein `ItemOrderModuleSorter`: `InventorySorter`, `ArmourySorter[12]`
-  (`ArmouryMainHandSorter` … `ArmourySoulCrystalSorter`), Satteltaschen, Gehilfen.
-- `Sorter->Items[anzeigeIndex]` → `ItemOrderModuleSorterItemEntry { Page, Slot, Index }`.
-  Im Arsenal ist `Page` 0 und `Slot` der echte Container-Platz (`ItemsPerPage` 35, Haupthand 50).
-- Unsortiert ist das die Identität (Log: `nonIdentity=0` in allen Kategorien). Nach
-  `/sort def Beine ggstufe abs` + `/sort los Beine`: 11 von 35 Einträgen verschoben.
-- `AgentItemDetail.Index` = Anzeige-Index (nicht Platz!). `AgentItemDetail.OnItemHovered`
-  liefert dagegen den echten Container + Platz: bei allen 12 Fokuswechseln gleich dem
-  Sorter-Eintrag am Anzeige-Index, zwei gleiche Hosen sauber getrennt. Darum liest
-  `ItemSlotService` die Instanz nur über diesen Hook, nie über einen Index.
-
-### `/sort` im deutschen Client
-
-- Befehl: `/sort` = `/sortieren` = `/itemsort` = `/isort` (Sheet `TextCommand` Zeile 210).
-- Die erlaubten Wörter stehen in Sheet `TextCommandParam`, NICHT im Hilfetext:
-  `def`/`condition` (253/252), `los`/`execute` (251/250), `zurück`/`clear`,
-  `ggstufe` (267), `aufs`/`asc` (281/280), `abs`/`des` (283/282).
-- Der Hilfetext nennt „aufsteigend, absteigend“ – das Spiel lehnt die ausgeschriebenen
-  Wörter ab (getestet 2026-10-05). Ohne Reihenfolge-Wort sortiert es aufsteigend.
-- Kategorie „Beine“ wird angenommen (getestet), steht aber nicht in `TextCommandParam`.
-- Sortieren ändert nur die Anzeige-Reihenfolge, nichts wird abgelegt. Die alte
-  Reihenfolge kommt nicht zurück.
-
-## Händler (Gil-Laden, Addon `Shop`): Menge und Gegenstandsart (gemessen 2026-10-05)
-
-- Jede Kaufzeile (ListItemRenderer in Liste id=16) hat: Text id=3 Name,
-  `NumericInput` id=4 Menge (Standard 1, max 99), Text id=6 Preis, Text id=8
-  eine zweite Zahl (vermutlich Bestand, NICHT geprüft). Die Rückkauf-Liste
-  (id=17) hat kein Mengenfeld.
-- Der Preis in der Zeile ist der GESAMTPREIS für die eingestellte Menge
-  (Menge 4 bei 28 Gil → „112, Heiltrank“).
-- Tasten (Log 19:45–19:51): NUM4 von der Zeile → Mengenfeld (Fokus id=5,
-  `IsActive` false); NUM0 → Bearbeiten (Fokus id=9, `IsActive` true); NUM0
-  erneut → Bearbeiten beenden, Menge bleibt in der Zeile. NUM6 zurück auf die
-  Zeile, NUM0 dort → SelectYesno „3 Heiltränke für 84 Gil kaufen?“.
-- Beim Bearbeiten: `CurrentDigitMultiplier` 1 = Einer, 10 = Zehner. Der Text
-  ist im Zehner-Modus zweistellig („04“), darum `Value` lesen, nicht den Text.
-  Zehnerschritte laufen um: unter 1 → 99, über 99 → 1.
-- Gegenstandsart = `Item.ItemUICategory.Name`, für Rüstung der Slot
-  („Kopf“, „Rumpf“, „Hände“, „Beine“, „Füße“, „Ring“ …). Umgesetzt in
-  `GearInfoService.DescribeByName`; Mengenfeld/Hinweise in `UIReaderService`
-  (`TryReadShopQuantityFocus`, `AppendShopRowQuantity`).
+- **_TitleMenu hat 6 Knoepfe** (Typ 1001, ids 4-9): Spiel starten, DATENZENTRUM,
+  Titel und Intro-Videos, Einstellungen, Lizenz, Beenden.
+- **Bei PostSetup ist IsReady=false** und die Knopftexte sind noch Vorlage
+  ('Eroeffnungssequenz', 'Systemkonfiguration', id=8 leer). Erst das erste
+  PostUpdate mit IsReady=true (~24 ms spaeter) traegt die echten Texte
+  (Sonde 2026-10-10 14:45:27.069 vs .093). Zaehlen/Lesen erst nach IsReady.
+- **_TitleRevision** (Versionszeile) wird ebenfalls nach dem Aufbau gefuellt;
+  der generische Scanner hielt das fuer eine Aenderung. Steht in HudNoiseAddons (stumm, User-Wahl).
