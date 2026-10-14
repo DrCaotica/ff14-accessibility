@@ -729,6 +729,10 @@ public sealed partial class UIReaderService : IDisposable
         // switch (user 2026-07-25: tabs were silent).
         _addonLifecycle.RegisterListener(AddonEvent.PostUpdate, "GrandCompanyExchange", OnGrandCompanyUpdate);
 
+        // Gil-Händler: Wechsel Kaufen/Zurückkaufen ansagen.
+        _addonLifecycle.RegisterListener(AddonEvent.PostSetup,  "Shop", OnShopSetup);
+        _addonLifecycle.RegisterListener(AddonEvent.PostUpdate, "Shop", OnShopUpdate);
+
         // Rang der staatlichen Gesellschaft (aus Charakter-Profil): Gesellschaft
         // + aktueller Rang. Radios sind nur Icons (Dump 2026-09-20).
         _addonLifecycle.RegisterListener(AddonEvent.PostUpdate, "GrandCompanyRank", OnGrandCompanyRankUpdate);
@@ -995,6 +999,10 @@ public sealed partial class UIReaderService : IDisposable
         if (list != null)
         {
             PushMenu(name, list->SelectedItemIndex);
+
+            // WORKAROUND: Shop rows belong to the focus reader alone (quantity
+            // field, hint, gear info); see IsFocusOwnedList.
+            if (IsFocusOwnedList(name)) return;
 
             // Nur Anzahl + aktuell gew�hlten Eintrag ansagen.
             // Alle Eintr�ge zu iterieren kann bei langen Listen zu Crashes f�hren
@@ -2475,6 +2483,112 @@ public sealed partial class UIReaderService : IDisposable
         return AtkText.Read((AtkTextNode*)n).Trim();
     }
 
+    // -- ArmouryBoard (Arsenalkammer) ---------------------------------
+
+    // Category title of the armoury chest ("Kopf", "Waffe" ...) as last
+    // announced, so switching tabs speaks the new category exactly once.
+    private string _lastArmouryCategory = string.Empty;
+
+    private unsafe void OnArmouryBoardUpdate(AddonEvent type, AddonArgs args)
+    {
+        var addon = (AtkUnitBase*)(nint)args.Addon;
+        if (addon == null) return;
+        if (!addon->IsVisible)
+        {
+            _lastArmouryCategory = string.Empty;
+            return;
+        }
+
+        // Title text node id=121 (dump 2026-07-16: [5] id=121 Text V "Kopf").
+        var node = addon->GetNodeById(121);
+        if (node == null || node->Type != NodeType.Text) return;
+        var category = AtkText.Read((AtkTextNode*)node).Trim();
+        if (string.IsNullOrEmpty(category) || category == _lastArmouryCategory) return;
+
+        var isSwitch = _lastArmouryCategory.Length > 0;
+        _lastArmouryCategory = category;
+        _log.Info($"[Accessibility] ArmouryBoard Kategorie: '{category}'");
+        // On open the window announcer names the window first - queue the
+        // initial category behind it instead of cutting it off; tab switches
+        // interrupt as usual.
+        if (isSwitch) _tolk.SpeakInterrupt(AccessibilityStrings.CategoryLabel(category));
+        else          _tolk.Speak(AccessibilityStrings.CategoryLabel(category));
+    }
+
+    // -- Shop (Gil-Händler): Reiter Kaufen / Zurückkaufen -------------
+
+    // Shop tab the player last heard about, "" until the window has been seen
+    // after opening. The tab a visit starts on is recorded silently - the
+    // window title was just spoken - and only a switch is announced.
+    private string _lastShopTab = string.Empty;
+
+    private void OnShopSetup(AddonEvent type, AddonArgs args) => _lastShopTab = string.Empty;
+
+    /// <summary>
+    /// Gil shop tab switch onto an EMPTY list. Normally the game moves the
+    /// cursor straight onto the first row of the new list (log 2026-10-06
+    /// 19:30:51, buy row -> buyback row in the same frame as the switch), and
+    /// <see cref="PrefixShopTab"/> names the tab in front of that row. An empty
+    /// list has no row to land on (the cursor goes to a textless node, log
+    /// 2026-10-06 19:40:31), so the tab is spoken here with "Keine Einträge".
+    /// The window shows nothing more: its Text id=15 ("Keine verkaufbaren
+    /// Gegenstände.") is flagged visible on the empty buyback tab, but an
+    /// ancestor stays hidden (dump 19:44:27: Res id=14, same place and size,
+    /// hidden), so it is not drawn. A non-empty list is left to the focus
+    /// reader: recording the tab here would take the prefix away from it.
+    /// </summary>
+    private unsafe void OnShopUpdate(AddonEvent type, AddonArgs args)
+    {
+        var addon = (AtkUnitBase*)(nint)args.Addon;
+        if (addon == null || !addon->IsVisible) return;
+
+        var tab = ReadCheckedRadioLabel(addon);
+        if (tab.Length == 0 || tab == _lastShopTab) return;
+        if (_lastShopTab.Length == 0)
+        {
+            _lastShopTab = tab;
+            _log.Info($"[Shop] Start-Reiter: '{tab}'");
+            return;
+        }
+
+        var list  = FindListInAddon(addon);
+        var count = list != null ? GetListEntryCount(list) : -1;
+        if (count != 0) return;
+
+        _lastShopTab = tab;
+        var spoken = $"{tab}. {AccessibilityStrings.NoEntries}";
+        _log.Info($"[Shop] Reiter (leere Liste): '{spoken}'");
+        _tolk.SpeakInterrupt(spoken);
+    }
+
+    /// <summary>
+    /// Puts the Shop tab name in front of the first focus line after a switch
+    /// ("Zurückkaufen. 25, Stahl-Bärlatschen, ..."). The game moves the cursor
+    /// into the new list in the same frame, so a separate tab announcement
+    /// would be cut off by that row at once. The cursor resting on the tab
+    /// button itself already says the name and gets no prefix.
+    /// </summary>
+    private unsafe string PrefixShopTab(AtkResNode* node, string text)
+    {
+        if (FindAddonNameForNode(node) != "Shop") return text;
+        var addon = FindAddonForNode(node);
+        if (addon == null) return text;
+
+        var tab = ReadCheckedRadioLabel(addon);
+        if (tab.Length == 0 || tab == _lastShopTab) return text;
+
+        var isSwitch = _lastShopTab.Length > 0;
+        _lastShopTab = tab;
+        if (!isSwitch)
+        {
+            _log.Info($"[Shop] Start-Reiter: '{tab}'");
+            return text;
+        }
+        _log.Info($"[Shop] Reiter gewechselt: '{tab}'");
+        if (text.StartsWith(tab, StringComparison.Ordinal)) return text;
+        return $"{tab}. {text}";
+    }
+
     // -- GrandCompanyExchange: Kategorie-Reiter -----------------------
 
     // Active category tab last announced, so switching speaks it once.
@@ -2507,7 +2621,7 @@ public sealed partial class UIReaderService : IDisposable
         GcNavigationProbe(addon);
 #endif
 
-        var category = ReadCheckedGcCategory(addon);
+        var category = ReadCheckedRadioLabel(addon);
         if (string.IsNullOrEmpty(category) || category == _lastGcCategory) return;
 
         var isSwitch = _lastGcCategory.Length > 0;
@@ -2732,10 +2846,12 @@ public sealed partial class UIReaderService : IDisposable
     }
 #endif
 
-    /// <summary>Label of the currently checked category RadioButton, or "" if
-    /// none is checked yet. Scans the addon's top-level nodes; the checked
-    /// button with a text label (id=2) is the active category.</summary>
-    private unsafe string ReadCheckedGcCategory(AtkUnitBase* addon)
+    /// <summary>Label of the currently checked RadioButton, or "" if none is
+    /// checked yet. Scans the addon's top-level nodes; the checked button with a
+    /// text label (id=2) is the active tab. Used for the seal shop categories and
+    /// the gil shop's Kaufen/Zurückkaufen tabs (dump 2026-10-06: RadioButton
+    /// id=4/id=5, label = text child id=2).</summary>
+    private unsafe string ReadCheckedRadioLabel(AtkUnitBase* addon)
     {
         for (var i = 0; i < addon->UldManager.NodeListCount; i++)
         {
@@ -4287,7 +4403,7 @@ public sealed partial class UIReaderService : IDisposable
             // SpeakFocusInterrupt: yields to recent error toasts (equip fail
             // from ContextMenu "Anlegen" restored this slot and wiped the
             // reason — log 2026-09-28 09:16:00 / 09:19:58).
-            text = PrefixCharacterTabHeader(node, text);
+            text = PrefixShopTab(node, text);
             _tolk.SpeakFocusInterrupt(text, (nint)node);
             MaybeSpeakShopQuantityHint(node);
         }
@@ -13399,6 +13515,25 @@ public sealed partial class UIReaderService : IDisposable
                 list->HeldItemIndex, hl.ToString());
     }
 
+    /// <summary>
+    /// Windows whose list rows are spoken by the focus reader only, never by the
+    /// generic list announcements (open summary, late-fill, row tracking).
+    ///
+    /// Shop: the focus reader has always spoken these rows. While FindListInAddon
+    /// returned the hidden, empty buyback list, the list path stayed silent;
+    /// since it finds the visible buy list it spoke every row too -
+    /// "0, 5.541, Mithril-Barbuta" and 8 ms later the focus line cut it off, so
+    /// each step began with a bare "0" (log 2026-10-06 19:11:59.901/.909). The
+    /// two texts differ (the list path keeps the one-character "Vorrat" column,
+    /// English "Bag", Addon sheet row 358), so the speech debounce cannot merge
+    /// them, and the list path's open summary was cut off the same way.
+    /// Clean path considered: one row reader for both paths, so the debounce
+    /// drops the repeat - not taken because it would change what the focus
+    /// reader says in every other window too (it drops one-character texts).
+    /// Approved by the user 2026-10-06.
+    /// </summary>
+    private static bool IsFocusOwnedList(string name) => name == "Shop";
+
     private unsafe void TrackListIndices(string name, AtkComponentList* list)
     {
         var state = ReadListIndices(list);
@@ -13412,6 +13547,9 @@ public sealed partial class UIReaderService : IDisposable
 
         _listIndexState[name] = state;
         _log.Info($"[ListProbe] {name}: Sel={state.Sel} Hov={state.Hov} Hov2={state.Hov2} Hov3={state.Hov3} Held={state.Held} HL=[{state.Hl}]");
+
+        // WORKAROUND: the focus reader already speaks this row; see IsFocusOwnedList.
+        if (IsFocusOwnedList(name)) return;
 
         // Announce the row of whichever candidate moved. Priority is only a
         // tie-breaker; the probe log shows which one actually fired so the
@@ -13593,8 +13731,18 @@ public sealed partial class UIReaderService : IDisposable
         return addon->HostId == socialId || addon->ParentId == socialId;
     }
 
+    /// <summary>
+    /// The window's list. With several lists the VISIBLE one wins: the gil shop
+    /// (Shop) holds its buyback list (id=17) before its buy list (id=16) and
+    /// only hides whichever tab is not active (dumps 2026-10-06 19:04/19:05).
+    /// Taking the first list read the hidden, usually empty buyback list on the
+    /// Buy tab and announced "Keine Einträge" over 14 wares. When no list is
+    /// visible, the first one is returned as before.
+    /// </summary>
     private static unsafe AtkComponentList* FindListInAddon(AtkUnitBase* addon)
     {
+        AtkComponentList* first = null;
+
         // Component nodes carry RAW type values >= 1000 (NodeType.Component
         // = 10000 is only what GetNodeType() returns, ilspycmd 2026-07-11).
         // The old check `Type != NodeType.Component` was therefore NEVER true
@@ -13608,7 +13756,11 @@ public sealed partial class UIReaderService : IDisposable
             var comp = ((AtkComponentNode*)node)->Component;
             if (comp == null) continue;
             if (IsListComponent(comp->GetComponentType()))
-                return (AtkComponentList*)comp;
+            {
+                if (node->IsVisible()) return (AtkComponentList*)comp;
+                if (first == null) first = (AtkComponentList*)comp;
+                continue;
+            }
             // A DropDownList keeps its options in an inner List component. That
             // is a collapsed SETTING inside a form, never the window's own menu.
             // Descending into it made the chat-log config panel announce
@@ -13626,11 +13778,12 @@ public sealed partial class UIReaderService : IDisposable
                 if (inner == null || (int)inner->Type < 1000) continue;
                 var innerComp = ((AtkComponentNode*)inner)->Component;
                 if (innerComp == null) continue;
-                if (IsListComponent(innerComp->GetComponentType()))
-                    return (AtkComponentList*)innerComp;
+                if (!IsListComponent(innerComp->GetComponentType())) continue;
+                if (node->IsVisible() && inner->IsVisible()) return (AtkComponentList*)innerComp;
+                if (first == null) first = (AtkComponentList*)innerComp;
             }
         }
-        return null;
+        return first;
     }
 
     // -- Bestiarium (Jagdtagebuch / MonsterNote) --------------------
@@ -16059,6 +16212,8 @@ public sealed partial class UIReaderService : IDisposable
         _addonLifecycle.UnregisterListener(AddonEvent.PostUpdate, "SelectYesno",   OnDialogButtonProbe);
         _addonLifecycle.UnregisterListener(AddonEvent.PostUpdate, "JournalResult", OnDialogButtonProbe);
         _addonLifecycle.UnregisterListener(AddonEvent.PostUpdate, "GrandCompanyExchange", OnGrandCompanyUpdate);
+        _addonLifecycle.UnregisterListener(AddonEvent.PostSetup,  "Shop", OnShopSetup);
+        _addonLifecycle.UnregisterListener(AddonEvent.PostUpdate, "Shop", OnShopUpdate);
         _addonLifecycle.UnregisterListener(AddonEvent.PostUpdate, "GrandCompanyRank", OnGrandCompanyRankUpdate);
         _addonLifecycle.UnregisterListener(AddonEvent.PostUpdate, "Inventory", OnInventoryUpdate);
         _addonLifecycle.UnregisterListener(AddonEvent.PostUpdate, "Buddy", OnBuddyUpdate);
