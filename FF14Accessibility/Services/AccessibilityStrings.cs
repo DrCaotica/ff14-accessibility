@@ -410,6 +410,11 @@ public static partial class AccessibilityStrings
     public static string ConfigSystem =>
         L("Systemeinstellungen", "System Configuration", "Системные настройки");
 
+    /// <summary>Opening sentence of the system configuration: window name plus
+    /// the page it opened on (with its option count).</summary>
+    public static string ConfigSystemOpened(string page) =>
+        IsGerman ? $"Systemeinstellungen. {page}." : $"System Configuration. {page}.";
+
     public static string ConfigSystemSaved =>
         L("Einstellungen gespeichert", "Settings saved", "Настройки сохранены");
 
@@ -1803,8 +1808,25 @@ public static partial class AccessibilityStrings
           $"{heading}, {count} {(count == 1 ? "setting" : "settings")}",
           $"{heading}, настроек: {count}");
 
-    public static string TabPressedNoPageChange => L("Reiter gedrückt, aber kein Seitenwechsel erkannt.", "Tab pressed, but no page change detected.", "Вкладка нажата, но смены страницы не произошло.");
-    public static string TabNotResponding => L("Reiter reagiert nicht.", "Tab not responding.", "Вкладка не отвечает.");
+    /// <summary>Page switched while the cursor is still on its tab. The game
+    /// needs a second confirm to move the cursor into the settings (log
+    /// 2026-10-10); a sighted player sees the cursor stay on the tab.</summary>
+    public static string ConfigPageConfirmAgain(string page) =>
+        IsGerman
+            ? $"{page}. Erneut bestätigen für die Einstellungen."
+            : $"{page}. Confirm again to enter the settings.";
+
+    /// <summary>Footer button "Voreinstellung" of the system configuration.
+    /// The game only resets after a yes/no question ("Alle Einstellungen auf
+    /// Voreinstellung zurücksetzen?"), and not just for the open tab
+    /// (disassembly, docs/game-api.md). The button itself shows only its name.</summary>
+    public static string ConfigResetButton(string label) =>
+        IsGerman
+            ? $"{label}. Setzt nach einer Rückfrage alle Einstellungen auf die Vorgabe des Spiels zurück."
+            : $"{label}. Resets all settings to the game's defaults after a confirmation.";
+
+    public static string TabPressedNoPageChange => IsGerman ? "Reiter gedrückt, aber kein Seitenwechsel erkannt." : "Tab pressed, but no page change detected.";
+    public static string TabNotResponding => IsGerman ? "Reiter reagiert nicht." : "Tab not responding.";
 
     // ── Datenzentrum / Gamepad / Uebung / Menue ──────────────────────
     public static string ChooseDataCenter => L("Datenzentrum wählen.", "Choose a data center.", "Выбери дата-центр.");
@@ -1844,7 +1866,13 @@ public static partial class AccessibilityStrings
     // the range, so drop "slider" and "from 0 to 100" - the long form got cut off
     // by the next control while navigating quickly (user report 2026-07-27).
     public static string SliderPercent(string label, string value) =>
-        L($"{label}, {value} %", $"{label}, {value}%", $"{label}, {value} %");
+        IsGerman ? $"{label}, {value} %" : $"{label}, {value}%";
+    /// <summary>Slider whose two ends are named on screen ("Bei Kamera" /
+    /// "Bei Charakter"): the value plus what its ends mean.</summary>
+    public static string SliderWithEnds(string valueSpeech, string minEnd, string maxEnd) =>
+        IsGerman
+            ? $"{valueSpeech}, von {minEnd} bis {maxEnd}"
+            : $"{valueSpeech}, from {minEnd} to {maxEnd}";
     public static string DropdownDesc(string label, string value) =>
         L($"{label}, Auswahlliste, {value}.", $"{label}, dropdown, {value}.", $"{label}, выпадающий список, {value}.");
     /// <summary>One option while stepping through an OPENED drop-down. Names the
@@ -4416,9 +4444,12 @@ public static partial class AccessibilityStrings
     // ── Listen / Reiter ohne eigene Beschriftung ────────────────────
     /// <summary>Icon-only tab: position alone, no label to announce.</summary>
     public static string TabPositionOnly(int index, int count) =>
-        L($"Reiter {index} von {count}.", $"Tab {index} of {count}.", $"Вкладка {index} из {count}.");
-    public static string EmptyList => L("Leere Liste.", "Empty list.", "Список пуст.");
-    public static string DialogWord => L("Dialog.", "Dialog.", "Диалог.");
+        IsGerman ? $"Reiter {index} von {count}." : $"Tab {index} of {count}.";
+    /// <summary>Focused icon tab with its game-given name: "Grafik, Reiter 3 von 8."</summary>
+    public static string TabNamePosition(string name, int index, int count) =>
+        IsGerman ? $"{name}, Reiter {index} von {count}." : $"{name}, tab {index} of {count}.";
+    public static string EmptyList => IsGerman ? "Leere Liste." : "Empty list.";
+    public static string DialogWord => IsGerman ? "Dialog." : "Dialog.";
 
     // ── Weltenwahl (TitleDCWorldMap) ────────────────────────────────
     public static string DataCenterRegions(string regions) =>

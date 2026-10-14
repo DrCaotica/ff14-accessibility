@@ -137,6 +137,12 @@ public sealed partial class UIReaderService : IDisposable
     private string _csLastTabText     = string.Empty;
     private readonly List<(uint NodeId, string Label)> _csTabs = [];
 
+    // Opening is ONE sentence, built in two steps (see OnConfigSystemOpen):
+    // the first recognised page says "Systemeinstellungen. <page>.", and the
+    // first tab position after it queues behind instead of cutting it off.
+    private bool _csOpenPending;
+    private bool _csQueueNextTabFocus;
+
     // Enter on a tab: remember WHICH tab we clicked so the page-change
     // announcement can state a truthful position ("Tab X von 8") - the
     // child-4 detection reported "Tab 8 von 8" on page 1 (log 2026-07-16
@@ -4403,6 +4409,7 @@ public sealed partial class UIReaderService : IDisposable
             // Typ und Wert in EINER Ansage liefert.
             if (FindAddonNameForNode(node) == "ConfigSystem"
                 && IsGlobalConfigControl("ConfigSystem", node)) return;
+            text = DescribeConfigResetButton(node, text);
             // Charaktererstellung, Schritt Aussehen: der EINZIGE Eingriff dieses
             // Features in den Fokus-Leser. Gibt den Text unveraendert zurueck, solange
             // der Fokus nicht in _CharaMakeFeature oder einem CMF*-Waehler steht - dort
@@ -6946,6 +6953,28 @@ public sealed partial class UIReaderService : IDisposable
         return found;
     }
 
+    // Footer button "Voreinstellung" of ConfigSystem (dump 2026-10-10: Comp(1010)
+    // id=592, the focus sits on its collision id=4). Its ButtonClick sends
+    // callback [Int 15]; the agent answers with a yes/no question and only on
+    // "yes" calls ConfigModule.ResetOptionsByCategoryMask - with no tab argument
+    // (disassembly 2026-10-11, docs/game-api.md). A sighted player reads the
+    // question after clicking; the label alone does not tell what it resets.
+    private const uint ConfigResetButtonId = 592;
+
+    /// <summary>
+    /// Adds what the "Voreinstellung" button of the system configuration does to
+    /// its label. Any other node is returned unchanged.
+    /// </summary>
+    private unsafe string DescribeConfigResetButton(AtkResNode* node, string text)
+    {
+        if (FindAddonNameForNode(node) != "ConfigSystem") return text;
+        var ptr = _gameGui.GetAddonByName("ConfigSystem");
+        if (ptr.IsNull) return text;
+        var owner = FindTopLevelOwner((AtkUnitBase*)(nint)ptr, node, out _);
+        if (owner == null || owner->NodeId != ConfigResetButtonId) return text;
+        return AccessibilityStrings.ConfigResetButton(text);
+    }
+
     /// <summary>
     /// True when the focused node belongs to a control that
     /// <see cref="AnnounceConfigGlobalFocus"/> already describes on its own
@@ -6962,7 +6991,13 @@ public sealed partial class UIReaderService : IDisposable
         var comp = ((AtkComponentNode*)owner)->Component;
         if (comp == null) return false;
         var ct = comp->GetComponentType();
-        return ct is ComponentType.Slider or ComponentType.DropDownList;
+        if (ct is ComponentType.Slider or ComponentType.DropDownList) return true;
+        // Category tabs of the system configuration: AnnounceConfigGlobalFocus
+        // speaks name AND position in one line. The generic reader read the
+        // same tooltip name ~10 ms after "Reiter 3 von 8." and cut the
+        // position off (log 2026-10-10 12:52:20.432 -> .442 'Grafik').
+        return addonName == "ConfigSystem" && ct == ComponentType.DragDrop
+            && owner->NodeId is >= 7 and <= 14 && _csTabs.Count > 0;
     }
 
     /// <summary>
@@ -8415,14 +8450,33 @@ public sealed partial class UIReaderService : IDisposable
         ReadConfigSystemTabs(addon);
         var (tabIdx, tabLabel) = GetFocusedTabInfo(addon);
         _csLastTabIndex = tabIdx;
-        _csLastTabText  = tabLabel;
 
-        // Ansage: "Systemeinstellungen. [Tab X von N.]"
-        var sb = new StringBuilder(AccessibilityStrings.ConfigSystem);
-        if (!string.IsNullOrEmpty(tabLabel) && _csTabs.Count > 0)
-            sb.Append($". {AccessibilityStrings.TabPosition(tabLabel, tabIdx + 1, _csTabs.Count)}");
-        sb.Append(".");
-        _tolk.SpeakInterrupt(sb.ToString());
+        // Hier wird NICHTS gesprochen. Die Seitenueberschrift ist zu diesem
+        // Zeitpunkt noch die alte: 12:52:19.235 las sie "Anzeigeeinstellungen",
+        // 1 ms spaeter im ersten Update stand "Sound" da - das Spiel oeffnet
+        // auf dem zuletzt benutzten Reiter (Log 2026-10-10). Gesprochen wurden
+        // drei Saetze in 15 ms, jeder unterbrechend; zu hoeren war nur der
+        // letzte ("Reiter 2 von 8.").
+        //
+        // Darum: _csLastTabText bleibt leer, so zaehlt die erste lesbare
+        // Ueberschrift im Update immer als Seitenwechsel - auch wenn das
+        // Fenster auf Reiter 1 oeffnet und der Text gleich bleibt. Dort kommt
+        // "Systemeinstellungen. <Seite>, N Einstellungen." und die erste
+        // Reiter-Position stellt sich dahinter an.
+        //
+        // tabIdx ist nicht belegt: alle acht Reiter tragen denselben
+        // Child-4-Zustand ([CS-TAB] T7..T14 alle F=0x2FB3, eff=True), also
+        // gewinnt immer der erste in der Knotenliste (id=14) und es hiess
+        // "Anzeigeeinstellungen, Tab 8 von 8" auf Reiter 1 (Log 2026-10-05
+        // 05:54:33 und 2026-10-10 12:37:32). ClientStructs hat weder Addon-
+        // noch Agent-Struktur fuer ConfigSystem, und ConfigSystemNumberArray
+        // aendert sich beim Reiterwechsel nicht ([CS-NUM] ohne Change-Zeile).
+        // Die Position kommt allein vom Tastatur-Fokus auf dem Reiter.
+        _csLastTabText       = string.Empty;
+        _csOpenPending       = true;
+        _csQueueNextTabFocus = false;
+        _log.Info($"[CS] Oeffnen: Ueberschrift beim Setup '{tabLabel}' (noch nicht gesprochen), "
+                  + $"Reiter-Index unbestaetigt (Erkennung lieferte {tabIdx + 1}).");
     }
 
     private void OnConfigSystemClose(AddonEvent type, AddonArgs args)
@@ -8432,6 +8486,8 @@ public sealed partial class UIReaderService : IDisposable
         _csTabs.Clear();
         _csLastTabIndex = -1;
         _csLastTabText  = string.Empty;
+        _csOpenPending       = false;
+        _csQueueNextTabFocus = false;
         _csTextChanges.Clear();
         _csLiveTexts.Clear();
         _lastTitleMenuText = string.Empty; // Dedup zur�cksetzen ? TitleMenu-Button wird neu angesagt
@@ -8616,19 +8672,41 @@ public sealed partial class UIReaderService : IDisposable
                 var pageOptions = CountVisibleConfigOptions(addon);
                 var pageLabel   = AccessibilityStrings.ConfigPageWithCount(tabLabel, pageOptions);
 
-                if (_csExpectedTabIdx >= 0)
+                if (_csOpenPending)
                 {
-                    _log.Info($"[CS] Tab-Wechsel -> '{tabLabel}' [{_csExpectedTabIdx + 1}/{_csTabs.Count}] "
-                              + $"(per Enter), {pageOptions} Einstellungen");
-                    _tolk.SpeakInterrupt(AccessibilityStrings.TabPosition(pageLabel, _csExpectedTabIdx + 1, _csTabs.Count));
-                    _csLastTabIndex   = _csExpectedTabIdx;
-                    _csExpectedTabIdx = -1;
+                    // First readable page after opening: window name + page
+                    // in one sentence. The tab position follows queued.
+                    _csOpenPending       = false;
+                    _csQueueNextTabFocus = true;
+                    _log.Info($"[CS] Oeffnen -> Seite '{tabLabel}', {pageOptions} Einstellungen");
+                    _tolk.SpeakInterrupt(AccessibilityStrings.ConfigSystemOpened(pageLabel));
                 }
                 else
                 {
-                    _log.Info($"[CS] Tab-Wechsel -> '{tabLabel}' (Index unbestaetigt, child4 lieferte {tabIdx + 1}), "
-                              + $"{pageOptions} Einstellungen");
-                    _tolk.SpeakInterrupt(pageLabel);
+                    // The game switches the page on the FIRST confirm but keeps
+                    // the cursor on the tab; only a second confirm moves it into
+                    // the settings (log 2026-10-10 13:39:47 / 13:40:08 / 13:40:20:
+                    // page change, focus still on the tab; 13:40:22 second
+                    // confirm -> "Töne visualisieren"). A sighted player sees the
+                    // cursor stay on the tab, so say it - but only while the
+                    // focus really is on a tab.
+                    var onTab = IsConfigTabFocused(addon);
+                    if (_csExpectedTabIdx >= 0)
+                    {
+                        _log.Info($"[CS] Tab-Wechsel -> '{tabLabel}' [{_csExpectedTabIdx + 1}/{_csTabs.Count}] "
+                                  + $"(per Enter), {pageOptions} Einstellungen, Fokus auf Reiter={onTab}");
+                        pageLabel = AccessibilityStrings.TabPosition(pageLabel, _csExpectedTabIdx + 1, _csTabs.Count);
+                        _csLastTabIndex   = _csExpectedTabIdx;
+                        _csExpectedTabIdx = -1;
+                    }
+                    else
+                    {
+                        _log.Info($"[CS] Tab-Wechsel -> '{tabLabel}' (Index unbestaetigt, child4 lieferte {tabIdx + 1}), "
+                                  + $"{pageOptions} Einstellungen, Fokus auf Reiter={onTab}");
+                    }
+                    _tolk.SpeakInterrupt(onTab
+                        ? AccessibilityStrings.ConfigPageConfirmAgain(pageLabel)
+                        : pageLabel);
                 }
                 LogTabMarkerProbe(addon); // [CS-TAB]: welcher Reiter traegt den Aktiv-Marker?
             }
@@ -8672,6 +8750,7 @@ public sealed partial class UIReaderService : IDisposable
         // Der fruehere flag-basierte Schritt hier (FindFocusedText, 0x100 =
         // HasCollision) fand nur den Fensterrahmen ("SYSTEMKONFIGURATION").
         AnnounceConfigGlobalFocus(addon);
+        HandleConfigHelpDwell(addon);
 
         // 3. Wert-Änderungen in Text-Nodes scannen und ansagen
         ScanConfigSystemTexts(addon);
@@ -8776,10 +8855,7 @@ public sealed partial class UIReaderService : IDisposable
                 // value-change branch above still detects changes reliably.
                 _csFocusPercent = slider->MinValue == 0 && slider->MaxValue == 100;
                 _csFocusValue = slider->Value.ToString();
-                _csFocusSystemVolume = isVolume && _csFocusPercent;
-                var sliderLabel = _csFocusSystemVolume ? volumeLabel
-                    : ConfigControlLabel(addon, top, _csFocusTopIdx, forwardFirst: false);
-                _csFocusLabel = sliderLabel;
+                var sliderLabel = ConfigControlLabel(addon, top, _csFocusTopIdx, forwardFirst: false, allowRight: true);
                 // Percentage sliders (volumes) get the SHORT form "label, value %"
                 // so it finishes speaking before the user moves on; other sliders
                 // keep the full form with their real min/max range.
@@ -8787,13 +8863,29 @@ public sealed partial class UIReaderService : IDisposable
                     ? AccessibilityStrings.SliderPercent(sliderLabel, _csFocusValue)
                     : AccessibilityStrings.SliderDesc(sliderLabel, _csFocusValue,
                         slider->MinValue, slider->MaxValue);
-                if (_csFocusSystemVolume) desc += ". " + AccessibilityStrings.SystemVolumeEditHint;
+                // Ends named under the slider ("Bei Kamera" / "Bei Charakter")
+                // are the only explanation the game shows for such a setting.
+                var (minEnd, maxEnd) = SliderEndLabels(addon, top);
+                if (minEnd.Length > 0)
+                    desc = AccessibilityStrings.SliderWithEnds(desc.TrimEnd('.'), minEnd, maxEnd);
                 break;
             }
             case ComponentType.DropDownList:
             {
-                var dropdown = DescribeDropDown((AtkComponentDropDownList*)comp, focus,
-                                                ConfigControlLabel(addon, top, _csFocusTopIdx, forwardFirst: false));
+                var isUiSkin = top->NodeId == UiSkinDropDownId;
+                var ddLabel  = isUiSkin
+                    ? ReadConfigTextById(addon, UiSkinHeadingId)
+                    : ConfigControlLabel(addon, top, _csFocusTopIdx, forwardFirst: false, allowRight: true);
+                var dropdown = DescribeDropDown((AtkComponentDropDownList*)comp, focus, ddLabel);
+                // Farbschema: the scheme's own one-line description sits on the
+                // preview picture; it belongs to the closed list, not to every
+                // option (it does not follow the browsed row - log 2026-10-10
+                // 21:50:25-34, the text scanner reported no change).
+                if (isUiSkin && dropdown.Text.Length > 0 && FindDropDownFocusRow((AtkComponentDropDownList*)comp, focus) < 0)
+                {
+                    var scheme = ReadConfigTextById(addon, UiSkinSchemeTextId);
+                    if (scheme.Length > 0) dropdown = ($"{dropdown.Text} {scheme}", dropdown.Value);
+                }
                 if (dropdown.Text.Length == 0)
                 {
                     // Seit der Doppelansage-Fix greift, ist dieser Zweig die
@@ -8805,24 +8897,133 @@ public sealed partial class UIReaderService : IDisposable
                 }
                 _csFocusValue = dropdown.Value;
                 desc = dropdown.Text;
+                // A closed drop-down can show an EMPTY field: "Voreinstellungen"
+                // in the display tab holds one row with no text, and its own
+                // display text is empty too ([DD-PROBE] 2026-10-10 13:47:54:
+                // Sel=0 Len=1, every text node ''). Say "leer" instead of a
+                // bare period. It was also greyed out (F=0x2113, Enabled 0x20
+                // cleared) - the same cue the switches already give.
+                if (dropdown.Value.Length == 0)
+                    desc = AccessibilityStrings.DropdownDesc(ddLabel, AccessibilityStrings.InputEmpty);
+                if (((ushort)top->NodeFlags & (ushort)NodeFlags.Enabled) == 0)
+                    desc = $"{desc.TrimEnd('.')}, {AccessibilityStrings.StateDisabled}.";
                 break;
             }
             case ComponentType.DragDrop when top->NodeId is >= 7 and <= 14 && _csTabs.Count > 0:
             {
-                // Category tab focused (icon-only): position readout; the page
-                // heading is announced by the tab-CHANGE detector once the tab
-                // is activated.
-                var idx = _csTabs.FindIndex(t => t.NodeId == top->NodeId);
+                // Category tab focused (icon-only): its name is the tooltip the
+                // game binds to it ([ConfigProbe] tip='Sound'/'Grafik', log
+                // 2026-10-10), plus the position. The page heading is announced
+                // by the tab-CHANGE detector once the tab is activated. No
+                // tooltip known -> position only, never a guessed name.
+                var idx  = _csTabs.FindIndex(t => t.NodeId == top->NodeId);
+                var name = _tooltips.TryGetTooltipDeep(focus) ?? _tooltips.TryGetTooltip(top);
                 _csFocusValue = string.Empty;
-                desc = AccessibilityStrings.TabPositionOnly(idx + 1, _csTabs.Count);
+                desc = string.IsNullOrEmpty(name)
+                    ? AccessibilityStrings.TabPositionOnly(idx + 1, _csTabs.Count)
+                    : AccessibilityStrings.TabNamePosition(name, idx + 1, _csTabs.Count);
                 break;
             }
             default:
                 return; // has text (generic reader speaks it) or unknown - stay silent
         }
 
-        _log.Info($"[CS] Fokus (global): {desc}");
-        _tolk.SpeakInterrupt(desc);
+        // First tab position right after the opening sentence: queue behind
+        // it (Log 2026-10-10 12:52:19: it came 14 ms later and cut it off).
+        // Any other focus first ends the queueing - it is a new step.
+        var queue = _csQueueNextTabFocus && comp->GetComponentType() == ComponentType.DragDrop;
+        _csQueueNextTabFocus = false;
+        _log.Info($"[CS] Fokus (global): {desc}{(queue ? " (angehaengt an Oeffnen)" : string.Empty)}");
+        if (queue) _tolk.Speak(desc);
+        else       _tolk.SpeakInterrupt(desc);
+    }
+
+    /// <summary>True while the game's keyboard focus sits on one of the eight
+    /// category tabs (DragDrop components, node ids 7-14).</summary>
+    private static unsafe bool IsConfigTabFocused(AtkUnitBase* addon)
+    {
+        var stage = AtkStage.Instance();
+        if (stage == null || stage->AtkInputManager == null) return false;
+        var focus = stage->AtkInputManager->FocusedNode;
+        if (focus == null) return false;
+        var top = FindTopLevelOwner(addon, focus, out _);
+        if (top == null || (int)top->Type < 1000 || top->NodeId is < 7 or > 14) return false;
+        var comp = ((AtkComponentNode*)top)->Component;
+        return comp != null && comp->GetComponentType() == ComponentType.DragDrop;
+    }
+
+    // Tab Farbschema (dump 2026-10-10 21:35): heading "Farbschema wählen"
+    // (Text 497 @697,330), preview picture (Image 501) carrying the caption
+    // "Vorschau" (Text 500) and the scheme description "Kühl und klassisch."
+    // (Text 499), the drop-down (502 @717,544) and under it the explanation
+    // "Diese Funktion ändert das Farbschema der UI-Fenster ..." (Text 505
+    // @717,576 512x120). The geometric label search took the picture caption
+    // "Vorschau" as the list's name (log 2026-10-10 21:45:29), and both texts
+    // were never read. ULD node ids are fixed per window layout, the same way
+    // the category tabs 7-14 are addressed.
+    private const uint UiSkinHeadingId    = 497;
+    private const uint UiSkinSchemeTextId = 499;
+    private const uint UiSkinDropDownId   = 502;
+    private const uint UiSkinHelpTextId   = 505;
+
+    // Dwell for the Farbschema explanation: which control the clock is timing,
+    // since when, and whether the text was already queued for this dwell.
+    private nint _csHelpDwellTop;
+    private long _csHelpTick;
+    private bool _csHelpSpoken;
+
+    /// <summary>Visible text of a top-level ConfigSystem text node, cleaned and
+    /// trimmed; "" when the node is missing, hidden or not a text.</summary>
+    private static unsafe string ReadConfigTextById(AtkUnitBase* addon, uint nodeId)
+    {
+        var n = addon->GetNodeById(nodeId);
+        if (n == null || n->Type != NodeType.Text || !IsEffectivelyVisible(n)) return string.Empty;
+        return AtkText.ReadClean((AtkTextNode*)n).Trim();
+    }
+
+    /// <summary>
+    /// Speaks the Farbschema explanation (Text 505) once the focus has stayed on
+    /// the CLOSED colour-scheme list for <see cref="ActionDescDwellSeconds"/> -
+    /// the same dwell as attribute and duty-finder help, so stepping past stays
+    /// quick. Runs every ConfigSystem frame; any other focus resets the clock.
+    /// </summary>
+    private unsafe void HandleConfigHelpDwell(AtkUnitBase* addon)
+    {
+        var stage = AtkStage.Instance();
+        var focus = stage != null && stage->AtkInputManager != null ? stage->AtkInputManager->FocusedNode : null;
+        var top   = (AtkResNode*)_csFocusTop;
+        var onList = focus != null && (nint)focus == _csFocusPtr && top != null
+                     && top->NodeId == UiSkinDropDownId && (int)top->Type >= 1000
+                     && ((AtkComponentNode*)top)->Component != null
+                     && FindDropDownFocusRow((AtkComponentDropDownList*)((AtkComponentNode*)top)->Component, focus) < 0;
+        if (!onList)
+        {
+            _csHelpDwellTop = 0;
+            return;
+        }
+
+        if (_csHelpDwellTop != _csFocusTop)
+        {
+            _csHelpDwellTop = _csFocusTop;
+            _csHelpTick     = System.Diagnostics.Stopwatch.GetTimestamp();
+            _csHelpSpoken   = false;
+            return;
+        }
+
+        if (_csHelpSpoken) return;
+        var elapsed = (double)(System.Diagnostics.Stopwatch.GetTimestamp() - _csHelpTick)
+                      / System.Diagnostics.Stopwatch.Frequency;
+        if (elapsed < ActionDescDwellSeconds) return;
+
+        _csHelpSpoken = true; // one-shot per dwell, even when there is no text
+        var help = FlattenDescription(ReadConfigTextById(addon, UiSkinHelpTextId));
+        if (help.Length == 0)
+        {
+            _log.Info($"[CS] Farbschema: Erklaerungstext id={UiSkinHelpTextId} leer oder unsichtbar.");
+            return;
+        }
+        _log.Info($"[CS] Farbschema-Erklaerung: '{help}'");
+        _tolk.Speak(AccessibilityStrings.SettingHelp(help));
     }
 
     /// <summary>Speech form of a config control value: percentage sliders (0..100)
@@ -8978,9 +9179,23 @@ public sealed partial class UIReaderService : IDisposable
     /// <summary>
     /// Label of a text-less configuration control (slider, drop-down, option
     /// row), chosen by SCREEN GEOMETRY: the nearest visible text that shares the
-    /// control's row and starts to its LEFT, otherwise the nearest text directly
+    /// control's row and starts to its LEFT, otherwise the nearest one in the row
+    /// that starts behind its RIGHT edge, otherwise the nearest text directly
     /// ABOVE it. That is the same thing a sighted player reads, and it does not
     /// depend on the order the window happens to be authored in.
+    ///
+    /// WHY the right side: ConfigSystem places slider names BEHIND the slider.
+    /// Dump 2026-10-10 21:35, tab Sound: slider id 113 @715 (220 wide), mute
+    /// checkbox id 114 @933, name "Hauptlautstärke" id 115 @961 - the same for
+    /// all seven volume rows, "Eigene"/"Gruppenmitglieder"/"Andere" and
+    /// "Systemtöne über Lautsprecher"; tab Barrierefreiheit the same for
+    /// "Größe", "Transparenz" and "Stärke" (sliders @735, names @961). With only
+    /// left and above, every volume slider was called by its block heading
+    /// "Lautstärkeeinstellungen" (log 2026-10-10 21:30:32-21:30:39). Left still
+    /// wins, so rows with a name in front keep it. The right side is opt-in
+    /// (<paramref name="allowRight"/>, set by <see cref="ConfigControlLabel"/>):
+    /// for the duty-finder and search windows no dump shows where their names
+    /// sit, so they keep left/above.
     ///
     /// WHY the node-list rules had to go: the list is ordered by descending node
     /// id, not by layout, and the direction therefore differs per panel. Log
@@ -9001,7 +9216,8 @@ public sealed partial class UIReaderService : IDisposable
     /// window's Scale applied before they are compared to screen distances.
     /// Returns "" when neither pass finds anything, so the caller can fall back.
     /// </summary>
-    private unsafe string ConfigLabelByGeometry(AtkUnitBase* addon, AtkResNode* control, out ConfigLabelSource how)
+    private unsafe string ConfigLabelByGeometry(AtkUnitBase* addon, AtkResNode* control, out ConfigLabelSource how,
+                                                bool allowRight = false)
     {
         how = ConfigLabelSource.None;
         if (addon == null || control == null) return string.Empty;
@@ -9016,6 +9232,8 @@ public sealed partial class UIReaderService : IDisposable
         var bestRowX   = float.MinValue;
         var bestAbove  = string.Empty;
         var bestAboveY = float.MinValue;
+        var bestRight  = string.Empty;
+        var bestRightX = float.MaxValue;
 
         for (var i = 0; i < addon->UldManager.NodeListCount; i++)
         {
@@ -9041,6 +9259,7 @@ public sealed partial class UIReaderService : IDisposable
             if (Math.Abs(nMidY - cMidY) <= Math.Max(cHeight, nHeight) / 2f)
             {
                 if (nLeft < cLeft && nLeft > bestRowX) { bestRowX = nLeft; bestRow = t; }
+                else if (nLeft >= cLeft + cWidth && nLeft < bestRightX) { bestRightX = nLeft; bestRight = t; }
                 continue;
             }
 
@@ -9053,6 +9272,7 @@ public sealed partial class UIReaderService : IDisposable
         }
 
         if (bestRow.Length > 0)   { how = ConfigLabelSource.RowLeft;      return bestRow; }
+        if (allowRight && bestRight.Length > 0) { how = ConfigLabelSource.RowRight;     return bestRight; }
         if (bestAbove.Length > 0) { how = ConfigLabelSource.HeadingAbove; return bestAbove; }
         return string.Empty;
     }
@@ -9065,6 +9285,7 @@ public sealed partial class UIReaderService : IDisposable
     {
         None,
         RowLeft,
+        RowRight,
         HeadingAbove,
     }
 
@@ -9073,11 +9294,14 @@ public sealed partial class UIReaderService : IDisposable
     /// <see cref="ConfigLabelByGeometry"/>), node-list order only as a fallback
     /// for windows where no text sits left of or above the control.
     /// <paramref name="forwardFirst"/> picks the fallback direction that window
-    /// family was measured with.
+    /// family was measured with. <paramref name="allowRight"/> also accepts a
+    /// name behind the control - measured for ConfigSystem only (dump 2026-10-10),
+    /// the character-configuration panels are not measured and keep left/above.
     /// </summary>
-    private unsafe string ConfigControlLabel(AtkUnitBase* addon, AtkResNode* control, int topIdx, bool forwardFirst)
+    private unsafe string ConfigControlLabel(AtkUnitBase* addon, AtkResNode* control, int topIdx, bool forwardFirst,
+                                             bool allowRight = false)
     {
-        var geo = ConfigLabelByGeometry(addon, control, out var how);
+        var geo = ConfigLabelByGeometry(addon, control, out var how, allowRight);
         if (geo.Length > 0)
         {
 #if DEBUG
@@ -9093,6 +9317,48 @@ public sealed partial class UIReaderService : IDisposable
         _log.Info($"[CS-Label] Geometrie ohne Treffer fuer id={control->NodeId} "
                   + $"@{control->ScreenX:0},{control->ScreenY:0} - Listenreihenfolge als Rueckfall.");
         return forwardFirst ? NearestPanelLabel(addon, topIdx) : NearestPrecedingLabel(addon, topIdx);
+    }
+
+    /// <summary>
+    /// Names of a slider's two ends when the window prints them directly under
+    /// it, left end first; both "" otherwise. Measured in ConfigSystem, tab
+    /// Sound (dump 2026-10-10 21:35): slider "Simulierung der Geräuschquelle"
+    /// id 107 @715,526 220x16, below it "Bei Kamera" id 108 @715,542 and
+    /// "Bei Charakter" id 109 @843,542. A sighted player reads the setting's
+    /// meaning from exactly these two words.
+    ///
+    /// Taken only when EXACTLY two visible texts start in the band of one slider
+    /// height below the slider and inside its horizontal span - the names of
+    /// the neighbouring rows sit behind the slider (@961, see
+    /// <see cref="ConfigLabelByGeometry"/>) and never qualify, and anything
+    /// else than a pair is not a pair of ends.
+    /// </summary>
+    private unsafe (string Min, string Max) SliderEndLabels(AtkUnitBase* addon, AtkResNode* slider)
+    {
+        var scale   = addon->Scale > 0f ? addon->Scale : 1f;
+        var cLeft   = slider->ScreenX;
+        var cRight  = cLeft + slider->Width * scale;
+        var cHeight = slider->Height * scale;
+        var cBottom = slider->ScreenY + cHeight;
+        var cMidY   = slider->ScreenY + cHeight / 2f;
+
+        var found = new List<(float X, string Text)>();
+        for (var i = 0; i < addon->UldManager.NodeListCount; i++)
+        {
+            var n = addon->UldManager.NodeList[i];
+            if (n == null || !IsEffectivelyVisible(n)) continue;
+            var t = ReadPanelLabelText(n);
+            if (t.Length == 0) continue;
+            if (n->ScreenY < cMidY || n->ScreenY > cBottom + cHeight) continue;
+            if (n->ScreenX < cLeft || n->ScreenX >= cRight) continue;
+            found.Add((n->ScreenX, t));
+        }
+        if (found.Count != 2) return (string.Empty, string.Empty);
+        found.Sort((a, b) => a.X.CompareTo(b.X));
+#if DEBUG
+        _log.Info($"[CS-Label] Endpunkte fuer id={slider->NodeId}: '{found[0].Text}' / '{found[1].Text}'");
+#endif
+        return (found[0].Text, found[1].Text);
     }
 
     /// <summary>
@@ -16925,6 +17191,16 @@ public sealed partial class UIReaderService : IDisposable
         // sie am Dump nicht zu beantworten - die Beschriftungssuche lief deshalb
         // jahrelang ueber die Knotenreihenfolge und lag im Grafik-Reiter
         // durchgehend eine Einstellung daneben (siehe ConfigLabelByGeometry).
+        // Der gebundene Tooltip ebenso: er haengt nicht immer am fokussierten
+        // Knoten, sondern auch an Beschriftungen oder Containern, und nur der
+        // Dump zeigt, WO ein Fenster ihn bindet.
+        var tip = _tooltips.TryGetTooltip(node);
+        if (tip != null)
+        {
+            tip = tip.Replace("\n", "?");
+            if (tip.Length > 80) tip = tip[..80] + "…";
+            extra += $" tip=\"{tip}\"";
+        }
         sb.AppendLine($"{indent}[{index}] id={node->NodeId} {typeName} F=0x{flags:X4} {vis} "
                       + $"@{node->ScreenX:0},{node->ScreenY:0} {node->Width}x{node->Height}{extra}");
 

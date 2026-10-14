@@ -1510,14 +1510,56 @@ hier um den Faktor neun.
 - Controls: CheckBox(3)/RadioButton(4)/Slider(6)/DropDownList(10),
   Label = Kind-Text id=2 der Komponente; Abschnitts-Überschriften sind
   eigenständige Top-Level-Texte (id 575 „Farbwahrnehmung" usw.).
-- Fußnoten-Buttons: „Voreinstellung"/„Schließen"/„Anwenden" (Comp 1001?
-  via Kind id=2-Text).
+- Fußnoten-Buttons (Dump 2026-10-10): Comp(1010) id=592 „Voreinstellung",
+  id=591 „Schließen", id=590 „Anwenden"; Fokus liegt auf der Kollision id=4
+  des Knopfs. Texte Addon 4003/4005/4004.
+- Was die Fußnoten-Knöpfe auslösen (ffxiv_dx11.exe 2026.09.15.0000.0000, Capstone,
+  Namen aus ClientStructs ida/data.yml gleicher Version; NICHT im Spiel gemessen):
+  - AddonConfigSystem.OnSetup (vtbl 0x142209BB8 Slot 49 = 0x1411457F0) registriert
+    ButtonClick: 592 → Param 3, 590 → Param 2, 591 → Param 1, 63 („Größe auf alle
+    UI-Elemente anwenden") → Param 4.
+  - ReceiveEvent (Slot 2 = 0x14114D620), ButtonClick-Tabelle base+0x114E6FC:
+    Param 3 → FireCallback [Int 15], Param 2 → [Int 0], Param 1 → [Int 1], Param 4 → [Int 0x22].
+  - AgentConfigSystem.ReceiveEvent (0x1404FA6C0) reicht Werte unter 0x10 an
+    0x1404F3D00 (gemeinsamer Teil der Konfig-Agenten) weiter. Wert 15 → OpenYesNo mit
+    Addon 4190 „Alle Einstellungen auf Voreinstellung zurücksetzen?" (Rückmeldung Art 3).
+    Erst bei „Ja" (Antwort 0) → Agent-vtbl Slot 21 (0x1404F80C0):
+    `ConfigModule.ResetOptionsByCategoryMask(Maske 0x900003F bzw. 0x16BDFFC0, je nach Byte
+    Agent+0x60)`, danach Agent+0x4D = 1 (dasselbe Flag, bei dem „Schließen" mit Addon 7530
+    „Änderungen verwerfen und Fenster schließen?" nachfragt). Kein Reiter-Argument →
+    wirkt nicht nur auf den offenen Reiter. Ob die Werte erst mit „Anwenden" gelten:
+    UNBELEGT. Bedeutung von Agent+0x60 und der Masken-Bits: UNBEKANNT.
+  - Wert 14 → 0x1404F3990 mit Addon 4191 „Die Einstellungen in diesem Untermenü
+    zurücksetzen?" (Kontextmenü-Eintrag 4182 „Dieses Untermenü zurücksetzen"),
+    Auslöser nicht verfolgt.
 - Lautstärke-Regler (Reiter „Sound", V5.58): Zeilen-Muster Top-Level-Text-Label
   → Stumm-CheckBox Comp(1027) → Slider Comp(1023); Label = nächster vorangehender
   Top-Level-Text (NearestPrecedingLabel). Slider laufen 0..100 → als Prozent
   ansagen. `NearestPrecedingLabel` findet z. B. „Hauptlautstärke" vor Slider id=113.
   KURZFORM für 0..100-Slider: „Label, Wert %" (kein „Regler, von 0 bis 100" —
   die Langform wurde beim schnellen Navigieren abgeschnitten, User 2026-07-27).
+- KORREKTUR (Dump 2026-10-10 21:35, mit Koordinaten): der Name eines Reglers steht
+  RECHTS hinter dem Regler, nicht davor. Reiter Sound: Regler id=113 @715 (220 breit),
+  Stumm-CheckBox Comp(1027) id=114 @933, Text "Hauptlautstärke" id=115 @961; ebenso
+  Hintergrundmusik/Soundeffekte/Stimmen/Systemtöne/Umgebungsgeräusche/Bardenkompositionen
+  (117..137), "Eigene"/"Gruppenmitglieder"/"Andere" (143/146/149) und "Systemtöne über
+  Lautsprecher" (157). Reiter Barrierefreiheit: "Größe"/"Transparenz"/"Stärke" @961 hinter
+  den Reglern @735. Die Block-Ueberschrift ("Lautstärkeeinstellungen") steht darueber.
+  Regler "Simulierung der Geräuschquelle" (id=107): Name darueber (id=106), unter dem
+  Regler die Endpunkte "Bei Kamera" (id=108, links) und "Bei Charakter" (id=109, rechts).
+- Tooltips (Dump 2026-10-10 21:35 mit tip-Spalte, alle 8 Seiten im Dump): das Spiel
+  bindet in ConfigSystem NUR 9 Tooltips - die 8 Reiter und den Knopf "Lerne mehr über
+  Immerse Spatial Audio" (Collision @1171,990). KEINE Einstellung hat einen Tooltip.
+  Unbekannt: 24x24-Komponenten Comp(1032) CT=Base am rechten Rand jeder Zeile im Reiter
+  Barrierefreiheit (z. B. id=579 @1247,496), ohne Tooltip-Bindung - Funktion nicht belegt.
+- Reiter Farbschema (Dump 2026-10-10 21:35): Ueberschrift Text 497 "Farbschema wählen",
+  Vorschaubild Image 501 (ConfigSystemUiSkin_hr1.tex) mit Bildtexten 500 "Vorschau" und
+  499 "Kühl und klassisch." (Schema-Beschreibung), Auswahlliste DropDownList 502 @717,544
+  (8 Schemata: Dunkel, Hell, Klassisch FF, Klares Blau/Weiß/Grün/Grau/Pink), zwei
+  textlose Knoepfe 503/504 (24x24) daneben - im Log nie im Tastaturfokus -, darunter
+  Erklaerungstext 505 @717,576 512x120. Einziges fokussierbares Element der Seite.
+  Text 499 aendert sich beim Blaettern in der offenen Liste NICHT (Log 21:50, Text-Scanner
+  ohne Meldung); ob er sich nach einer Auswahl aendert, ist nicht gemessen.
 - FALLE Doppel-Ansage (V5.58): Audio-Slider tragen den Wert als Text-Kind id=2
   („100"); der GENERISCHE Fokus-Leser las diese nackte Zahl ~14 ms nach der
   Config-Ansage und würgte das Label ab. Fix: nackte Zahlen überspringen, solange
@@ -1527,6 +1569,15 @@ hier um den Faktor neun.
   Node — ilspycmd-verifiziert gegen FFXIVClientStructs; Dump: aktiv F=0x2033 vs.
   ausgegraut F=0x2013 (z. B. Hintergrund-Wiedergabe-Unterpunkte bei Master AUS,
   und der „Anwenden"-Button vor einer Änderung).
+- Reiter-Bedienung (Log 2026-10-10 13:39-13:47): das 1. Bestaetigen auf einem
+  Reiter schaltet die Seite um, der Tastatur-Fokus BLEIBT auf dem Reiter; erst
+  das 2. Bestaetigen fuehrt in die Einstellungen. Auch der beim Oeffnen gezeigte
+  Reiter braucht beide Schritte. Reines Blaettern ueber die Reiter schaltet die
+  Seite NICHT um. Nach Reiter 8 folgt der Knopf „Voreinstellung" (Button, id=4).
+- Leere Auswahlliste: Anzeige → „Voreinstellungen" (DropDownList id=38) hatte
+  List.SelectedItemIndex=0, ListLength=1, alle Textknoten leer und F=0x2113
+  (Enabled geloescht) bei „Rahmenloses Fenster" (Sonde 2026-10-10 13:47:54).
+  Ansage „leer, ausgegraut". Ob die Sperre am Fenstermodus haengt: unbelegt.
 - Barrierefreiheit = Reiter 8 (DragDrop, Tooltip „Barrierefreiheit"). Seite schaltet
   beim NAVIGIEREN um und wird gelesen (Farbwahrnehmung/Töne visualisieren/Transparenz
   etc.). Enter wird in ConfigSystem vom Spiel geschluckt (IKeyState sieht es nicht) →
