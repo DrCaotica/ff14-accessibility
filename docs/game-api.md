@@ -3328,13 +3328,79 @@ Erkennung weiter nur über Spieldaten (ENpcBase.ENpcData), keine Namen.
 Offline-Zählung sqpack EN: +~186 NPCs nur über Indirection, ~666 schon direkt.
 
 
-## Titelbildschirm: _TitleMenu und _TitleRevision (2026-10-10)
+## Handwerk: Notizbuch, Synthese-Fenster, Synthese-Planer (Dumps + Messung 2026-10-07)
 
-- **_TitleMenu hat 6 Knoepfe** (Typ 1001, ids 4-9): Spiel starten, DATENZENTRUM,
-  Titel und Intro-Videos, Einstellungen, Lizenz, Beenden.
-- **Bei PostSetup ist IsReady=false** und die Knopftexte sind noch Vorlage
-  ('Eroeffnungssequenz', 'Systemkonfiguration', id=8 leer). Erst das erste
-  PostUpdate mit IsReady=true (~24 ms spaeter) traegt die echten Texte
-  (Sonde 2026-10-10 14:45:27.069 vs .093). Zaehlen/Lesen erst nach IsReady.
-- **_TitleRevision** (Versionszeile) wird ebenfalls nach dem Aufbau gefuellt;
-  der generische Scanner hielt das fuer eine Aenderung. Steht in HudNoiseAddons (stumm, User-Wahl).
+Quellen: Desktop-Dumps FFXIV_UI_Dump_Notizbuch.txt (RecipeNote), FFXIV_UI_Dump_Planer.txt
+(Synthesis), "FFXIV_UI_Dump_planer (2).txt" (Synthesis + CraftActionSimulator), Debug-Messung
+[CraftProbe] im dalamud.log 2026-10-07 20:08-20:40.
+
+**RecipeNote (Handwerker-Notizbuch)**
+- Stufenbereiche (TreeList id=39): das Spiel listet den hoeheren Bereich OBEN ("6-10" y=355
+  ueber "1-5" y=375). Kein Mod-Fehler.
+- Reiter = RadioButtons id=13..20 (8 Handwerksklassen) und id=21 (Rezeptsuche), nur Bilder.
+  Namen als Text-Tooltip auf dem Collision-Kind id=7 (AttachTooltip beim Aufbau).
+  Num9 = Reiter Rezeptsuche (Cursor springt im selben Frame ins Suchfeld id=26),
+  Num7 = zurueck. Cursor erreicht die Reiter nicht.
+- Umschaltknopf id=34 (Button, 2 Bildhaelften, unter "Rezepte"): kein Tooltip, Num0 aendert
+  nichts. Bedeutung UNBEKANNT. Im Suchmodus statt dessen id=33 (Tooltip "Zuletzt gesucht").
+- Feld -> Knoten (Adressvergleich): Probe=102 Eil=103 Synthese=104 KatZurueck=43 KatVor=44
+  SeiteZurueck=46 SeiteVor=47 Filter=56 Kategorie=42 Rezeptliste=45 NQ=85 HQ=86
+  Seitentext=48 Herstellbar=78 Rezeptname=63.
+- Rezeptzeilen tragen kein Material-Zeichen. "Herstellbar" (id=78) gilt fuer das Rezept im
+  Detailbereich; der Detailbereich FOLGT dem Cursor (Test 20:37: Name im Detail = Zeile bei
+  jedem Schritt, Zahl wechselt mit: 2, 2, 0, 0).
+- Kristall-Plaetze id=82 (links) / id=83 (rechts) (Button 1016): Text id=2 = benoetigt, id=3 =
+  Bestand, kein Namensknoten. Links/rechts = Recipe-Sheet-Slots 6/7 (Dump Bronzespeer: Icons
+  020004/020003 = Windscherbe/Eisscherbe = Slots 6/7 von Rezept 1017, offline sqpack). Nicht
+  benutzter Platz: Text leer, Cursor erreicht ihn trotzdem. RecipeEntry.Crystals[i].Id war in
+  beiden Messungen die Item-Id (4 = Windscherbe, 3 = Eisscherbe); benutzt wird das Sheet.
+- Material-Zeilen id=89 (oben) .. id=94 (Comp 1039) = Sheet-/RecipeEntry-Slots 0..5. In der Zeile:
+  Name id=18 (Item-Link), benoetigt id=4, Symbol-Knopf id=5, NQ-Knopf id=11 (Text id=2 darin =
+  gewaehlt) ueber Text id=12 (NQ-Bestand), HQ-Knopf id=14 / Text id=15. Belegt: "1 gewaehlt,
+  2 im Beutel, 1 benoetigt" (gewaehlt kann benoetigt nicht ueberschreiten).
+- WICHTIG: Unbenutzte Material-Zeilen werden nur VERSTECKT und behalten den Text frueherer
+  Rezepte (Ahorn-Bauholz: id=90 'Wachstumsformel Alpha', id=91 'Bronzebarren', sichtbar=False).
+  Nur sichtbare Zeilen zaehlen.
+- Symbol-Knopf: AgentItemDetail antwortet dort nicht immer; der Bild-Rueckfall verwechselt
+  Gegenstaende mit gleichem Icon (Bronzebarren -> Weichsilber-Barren, Icon 20803). Gegenstand
+  daher aus RecipeList->SelectedRecipe->Ingredients[Zeile-89], gegen Name id=18 geprueft.
+- "Im Beutel" des Ergebnisses (SelectedRecipeResultQuantityInInventoryNqAndHq) steht roh als
+  "2\r1": NQ, CR, HQ-Zeichen (SeIconChar.HighQuality), HQ.
+
+**Synthesis (Synthese-Fenster)**
+- Collision id=49 (Eltern Res id=46) liegt auf dem Gegenstandsbild, Name = AddonSynthesis.ItemName.
+- CheckBox id=7 klappt die Liste aktiver Verstaerkungen auf (Res id=26/27 sichtbar). Ohne
+  aktive Verstaerkung bleibt die Liste leer (Effekt-Slots id=29..37 unsichtbar) - sichtbar
+  aendert sich dann nichts.
+- ClientStructs-Feld ToggleCraftEffectPane zeigt in dieser Version auf Text id=24
+  ("Benoetigter Sammlerwert") - NICHT benutzen.
+- Synthese-Planer-Knopf = id=39 (CalculationsButton), Abbrechen = id=40 (QuitButton).
+
+**CraftActionSimulator (Synthese-Planer)**
+- Reiter RadioButtons id=3 Favoriten, 4 Synthese, 5 Veredelung (mit Text), Num7/Num9 wechseln.
+- Liste id=6; Zeile = Icon + EIN Text (Wirkung oder "Noch nicht erlernt."), der andere Text
+  ist ueber den Eltern-Res versteckt. Kein Aktionsname, keine Tooltip-/Aktionsbindung.
+- AgentCraftActionSimulator.Progress / .Quality (StdVector<EfficiencyCalculation>: BaseActionId,
+  ActionId, Effizienz, Zuwachs, ActionStatus) = Zeilen der Reiter Synthese (8) und Veredelung
+  (13). ActionId -> CraftAction-Sheet (Action-Sheet hat diese Ids nicht). Zuordnung Zeile ->
+  Aktion ueber Icon (AtkComponentIcon.IconId == CraftAction.Icon), Test 20:38 alle Zeilen richtig.
+- Nach Reiterwechsel zeigt die Liste einen Frame lang noch den alten Reiter.
+## Handwerkernotizbuch: Ansichts-Umschalter (Knopf id=34 / id=35, 2026-10-11)
+
+Gelesen in ffxiv_dx11.exe 2026.09.15.0000.0000 (Capstone, Namen aus ClientStructs ida/data.yml gleicher Version), gemessen per Sonde:
+- Knoten unter „Rezepte": id=34 Button (2 Haelften, nur Bilder, keine Tooltip-Bindung), id=35 Variante mit 3 Haelften, id=33 Suchmodus
+  (Tooltip „Zuletzt gesucht", Addon 1703). Fokus landet auf der Kollision id=8 von 34.
+- Klick: `ButtonClick param 23` an AddonRecipeNote. ReceiveEvent = vtbl 0x14222F5C0 Slot 2 = 0x141232860, Sprungtabellen
+  (Ereignistyp-6 -> base+0x1233448/0x1233410; param-1 -> base+0x1233488). param 23 -> 0x1412365A0:
+  `FireCallbackAndHideOrClose(this, 4, [Int 2, Undef, Undef, Undef])` = `FireCallback(4, values, close: true)`.
+  KEINE Mausposition im Pfad -> welche Haelfte, ist egal. (param 24 -> 0x141236650 [Int 3, Int Feld+0x346c==0], param 20/21 -> 0x141236480(1/0), nicht untersucht.)
+- AgentRecipeNote.ReceiveEvent (vtbl 0x1421C4890 Slot 0 = 0x140C8C040), Werttabelle base+0xC8DBA8, Wert 2 -> 0x140C8CF44:
+  Ansicht = Agent+0x3B4; 0 -> 1 nur wenn Byte+0x3C4 != 0 (sonst nichts), 1 -> 2 wenn Byte+0x3C5 != 0 sonst 0, 2 -> 0. Gesperrt wenn Byte+0x3E6 != 0.
+- Listenaufbau 0x140C90F50: NumberArray RecipeNote (29) `[0x89]` = Ansicht, `[0x8A]` = 1 | 2*(3C4) | 4*(3C5) (freigeschaltete Ansichten),
+  `[4]` = Agent+0x3B0. Listenueberschrift: Ansicht 0 = Addon 1710 „Nach Stufe sortiert", Ansicht 1 = Addon 1711 „Spezialrezepte",
+  Ansicht 2 = Text aus anderer Tabelle (0x44 Eintraege je Klasse) - Name NICHT ermittelt.
+- Messung 2026-10-11: Num0 auf dem Knopf erzeugt KEIN Fensterereignis (Spiel ignoriert die Taste dort). Gesetzter Mauszeiger (SetCursorPos)
+  kam im Spiel-Cursor an (UIInputData.CursorInputs), ergab aber kein MouseOver/Click am Knopf - Ursache offen.
+  User-Konto: Ansicht 0, Maske 1 -> Callback [2] kommt am Agent an, aendert nichts (wie Mausklick).
+- Mod (UIReaderService): Ansage aus NumberArray + Addon-Texten; Num0 (nicht geschluckt) feuert denselben Callback, Ansicht wird zurueckgelesen.
+  Umschalten selbst noch NICHT im Spiel getestet (braucht freigeschaltete Spezialrezepte).

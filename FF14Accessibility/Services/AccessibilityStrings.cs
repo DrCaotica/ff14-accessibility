@@ -4182,7 +4182,27 @@ public static partial class AccessibilityStrings
     /// <summary>Spoken once when the crafting log opens: window plus the class
     /// whose recipes are shown ("Handwerker-Notizbuch, Alchemist, Stufe 5").</summary>
     public static string RecipeNoteOpened(string jobAndLevel) =>
-        L($"Handwerker-Notizbuch, {jobAndLevel}", $"Crafting log, {jobAndLevel}", $"Журнал ремесленника, {jobAndLevel}");
+        IsGerman ? $"Handwerker-Notizbuch, {jobAndLevel}"
+                 : $"Crafting log, {jobAndLevel}";
+    /// <summary>Crafting log view toggle with more than one view unlocked
+    /// ("Rezeptansicht: Nach Stufe sortiert, Umschalter, 1 von 2").</summary>
+    public static string RecipeViewPosition(string view, int index, int total) =>
+        IsGerman ? $"Rezeptansicht: {view}, Umschalter, {index} von {total}"
+                 : $"Recipe view: {view}, toggle, {index} of {total}";
+    /// <summary>Crafting log view toggle when the game unlocks no other view.</summary>
+    public static string RecipeViewSingle(string view) =>
+        IsGerman ? $"Rezeptansicht: {view}, Umschalter, keine weitere Ansicht freigeschaltet"
+                 : $"Recipe view: {view}, toggle, no other view unlocked";
+    /// <summary>Fallback name of a view the game names from a table not yet identified.</summary>
+    public static string RecipeViewNumber(int number) =>
+        IsGerman ? $"Ansicht {number}" : $"View {number}";
+    /// <summary>Toggle sent, but the window still shows the same view after the wait.</summary>
+    public static string RecipeViewUnchanged(string view) =>
+        IsGerman ? $"Ansicht nicht gewechselt, weiter {view}"
+                 : $"View not changed, still {view}";
+    /// <summary>The window's view state could not be read.</summary>
+    public static string RecipeViewUnreadable =>
+        IsGerman ? "Rezeptansicht nicht lesbar." : "Recipe view not readable.";
     /// <summary>A list row with its position ("Destilliertes Wasser, Stufe 1, 3 von 12").</summary>
     public static string RowWithPosition(string row, int index, int total) =>
         L($"{row}, {index} von {total}", $"{row}, {index} of {total}", $"{row}, {index} из {total}");
@@ -4193,7 +4213,27 @@ public static partial class AccessibilityStrings
         L("noch nie hergestellt, Bonus für das erste Mal", "not crafted yet, first-time bonus", "ещё не изготовлено, бонус за первый раз");
     /// <summary>Recipe row that has been crafted at least once before.</summary>
     public static string RecipeRowCrafted =>
-        L("schon hergestellt", "already crafted", "уже изготовлено");
+        IsGerman ? "schon hergestellt" : "already crafted";
+    /// <summary>How many the bag makes, the detail pane's "Herstellbar" number,
+    /// passed through as the game shows it.</summary>
+    public static string RecipeRowCraftable(string count) =>
+        IsGerman ? $"herstellbar {count}" : $"craftable {count}";
+    /// <summary>A tab of the crafting log; the name is the game's tooltip.</summary>
+    public static string CraftTab(string label) =>
+        IsGerman ? $"{label}, Registerkarte" : $"{label}, tab";
+    /// <summary>A tab whose name the game did not bind - said rather than silence.</summary>
+    public static string CraftTabUnnamed =>
+        IsGerman ? "Registerkarte ohne Namen" : "Unnamed tab";
+    /// <summary>A tab of the synthesis planner with its place in the row.</summary>
+    public static string CraftPlannerTab(string label, int index, int count) =>
+        IsGerman ? $"{label}, Registerkarte {index} von {count}" : $"{label}, tab {index} of {count}";
+    /// <summary>Tab line and the line about where the cursor landed, as one announcement.</summary>
+    public static string TabThenLine(string tab, string line) => $"{tab}. {line}";
+    /// <summary>The effect-list toggle in the synthesis window. The game gives
+    /// it neither text nor tooltip; the label is the mod's.</summary>
+    public static string SynthesisEffectsToggle(bool open) =>
+        IsGerman ? $"Liste der aktiven Verstärkungen, {(open ? "aufgeklappt" : "zugeklappt")}"
+                 : $"Active effects list, {(open ? "expanded" : "collapsed")}";
     /// <summary>Progress needed to finish the craft (client label "Fertig mit").</summary>
     public static string RecipeDifficulty(string value) =>
         L($"Fertig mit {value}", $"Progress needed {value}", $"Прогресс нужен {value}");
@@ -4210,17 +4250,37 @@ public static partial class AccessibilityStrings
         L($"Herstellbar {value}", $"Craftable {value}", $"Можно сделать {value}");
     /// <summary>How many of the RESULT item the player already owns.</summary>
     public static string RecipeInBag(string value) =>
-        L($"Im Beutel {value}", $"In bag {value}", $"В сумке {value}");
+        IsGerman ? $"Im Beutel {value}" : $"In bag {value}";
+    /// <summary>Result item in the bag, split by quality as the window shows it.</summary>
+    public static string RecipeInBagNqHq(string nq, string hq) =>
+        IsGerman ? $"Im Beutel {nq} NQ, {hq} HQ" : $"In bag {nq} NQ, {hq} HQ";
     /// <summary>One material line. NQ and HQ are always both named (user decision
     /// 2026-08-08): HQ material raises starting quality, so a silent zero would
     /// hide a real choice.</summary>
     public static string RecipeMaterial(string name, string needed, string nq, string hq) =>
-        MaterialWithStock(name, needed, nq, hq);
-    /// <summary>A crystal row. The window shows crystals as icons only - it
-    /// carries no name node (ilspycmd 2026-08-08: CrystalNodes has Image but no
-    /// Name), so the element stays unnamed rather than guessed.</summary>
-    public static string RecipeCrystal(string needed, string owned) =>
-        L($"Kristall, {CraftingCount(needed)} benötigt, vorhanden {CraftingCount(owned)}", $"Crystal, need {CraftingCount(needed)}, have {CraftingCount(owned)}", $"Кристалл, нужно {CraftingCount(needed)}, есть {CraftingCount(owned)}");
+        IsGerman ? $"{name}, {needed} benötigt, {nq} NQ, {hq} HQ"
+                 : $"{name}, {needed} needed, {nq} NQ, {hq} HQ";
+    /// <summary>A crystal slot. The window shows crystals as icons only, so the
+    /// name comes from the recipe's own data; when that join cannot be confirmed
+    /// the slot is called "crystal" rather than given a guessed name.</summary>
+    public static string RecipeCrystal(string name, string needed, string owned)
+    {
+        if (name.Length == 0) name = IsGerman ? "Kristall" : "Crystal";
+        return IsGerman ? $"{name}, {needed} benötigt, {owned} im Beutel"
+                        : $"{name}, {needed} needed, {owned} in bag";
+    }
+    /// <summary>A crystal slot the selected recipe does not use.</summary>
+    public static string RecipeCrystalEmpty =>
+        IsGerman ? "Kristall-Platz, leer" : "Crystal slot, empty";
+    /// <summary>The NQ or HQ column of one material row: how many of that
+    /// quality are taken for the craft, how many the bag holds, how many the
+    /// recipe needs in total.</summary>
+    public static string RecipeMaterialColumn(string name, bool hq, string chosen, string owned, string needed)
+    {
+        var quality = hq ? "HQ" : "NQ";
+        return IsGerman ? $"{name}, {quality}: {chosen} gewählt, {owned} im Beutel, {needed} benötigt"
+                        : $"{name}, {quality}: {chosen} chosen, {owned} in bag, {needed} needed";
+    }
     /// <summary>Said instead of the values when no recipe is selected yet.</summary>
     public static string RecipeNoSelection =>
         L("Kein Rezept ausgewählt.", "No recipe selected.", "Рецепт не выбран.");
