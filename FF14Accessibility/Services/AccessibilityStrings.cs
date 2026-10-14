@@ -1828,6 +1828,75 @@ public static partial class AccessibilityStrings
     public static string TabPressedNoPageChange => IsGerman ? "Reiter gedrückt, aber kein Seitenwechsel erkannt." : "Tab pressed, but no page change detected.";
     public static string TabNotResponding => IsGerman ? "Reiter reagiert nicht." : "Tab not responding.";
 
+    // ── HUD-Fokus (Numpad1, PAD_HUDFOCUS) ───────────────────────────
+    // Numpad1 cycles the cursor through these HUD areas (log 2026-10-11
+    // 13:11-13:32: JobHudNotice -> ScenarioTree -> ChatLog -> _ToDoList ->
+    // _NaviMap). A sighted player sees WHERE the cursor sits; the names below
+    // say it. Wording chosen by the user (Chat, Mini-Map, Job-Hinweis).
+    public static string HudRegionJobNotice => IsGerman ? "Job-Hinweis" : "Job notice";
+    public static string HudRegionScenario  => IsGerman ? "Szenario-Leitfaden" : "Scenario guide";
+    public static string HudRegionChat      => "Chat";
+    public static string HudRegionDutyList  => IsGerman ? "Auftragsliste" : "Duty list";
+    public static string HudRegionMiniMap   => IsGerman ? "Mini-Map" : "Mini-map";
+
+    /// <summary>Scenario guide entry with what kind of quest it is: the game's
+    /// heading for the main scenario row, the journal genre for the job quest
+    /// row ("Mönch-Jobaufträge: Ätherische Harmonie").</summary>
+    public static string ScenarioTreeEntry(string kind, string quest) => $"{kind}: {quest}";
+
+    // Mini-map elements without text or tooltip. Measured 2026-10-11 13:41:
+    // NUM0 on the upper button raised the map's zoom value (1.25 -> 1.5), on
+    // the lower one lowered it (1.5 -> 1.25).
+    public static string MiniMapZoomIn  => IsGerman ? "Hineinzoomen, Knopf" : "Zoom in, button";
+    public static string MiniMapZoomOut => IsGerman ? "Herauszoomen, Knopf" : "Zoom out, button";
+
+    /// <summary>An icon button in a HUD area, named by the game's own tooltip
+    /// text ("Chatlog-Einstellungen, Knopf").</summary>
+    public static string HudButton(string label) =>
+        IsGerman ? $"{label}, Knopf" : $"{label}, button";
+
+    /// <summary>The chat input field under the HUD cursor, with the channel a
+    /// message would go to ("Kanal-Eingabe, Sagen"). Wording chosen by the user
+    /// 2026-10-11 - "Chat-Eingabe" after the area name "Chat" said Chat twice.</summary>
+    public static string HudChannelInput(string channel) =>
+        channel.Length == 0
+            ? (IsGerman ? "Kanal-Eingabe" : "Channel input")
+            : (IsGerman ? $"Kanal-Eingabe, {channel}" : $"Channel input, {channel}");
+
+    /// <summary>The chat window switched its tab while the cursor is in it
+    /// ("Reiter Kampf, 2 von 3").</summary>
+    public static string ChatLogTab(string name, int index, int count) =>
+        IsGerman ? $"Reiter {name}, {index} von {count}" : $"Tab {name}, {index} of {count}";
+
+    /// <summary>The message selected in a chat message panel with its place in
+    /// the tab ("vnavmesh v1.2.3.14 geladen., 15 von 15"). An empty message is an
+    /// empty line in the chat (measured 2026-10-11 15:06) and is said as such.
+    /// Position wanted by the user 2026-10-11.</summary>
+    public static string ChatPanelMessage(string message, int index, int count)
+    {
+        var body = message.Length > 0 ? message : (IsGerman ? "Leere Zeile" : "Empty line");
+        return IsGerman ? $"{body}, {index} von {count}" : $"{body}, {index} of {count}";
+    }
+
+    /// <summary>The chat panel's selection could not be matched to a message
+    /// (stored offset no longer fits, e.g. after a game patch).</summary>
+    public static string ChatPanelUnreadable =>
+        IsGerman ? "Chat-Meldung nicht lesbar" : "Chat message unreadable";
+
+    /// <summary>Weather icon of the mini-map; the weather name is the game's
+    /// own mouse-over text ("Regnerisch").</summary>
+    public static string MiniMapWeather(string weather) =>
+        IsGerman ? $"Wetter: {weather}" : $"Weather: {weather}";
+
+    /// <summary>"{region}, {text}" when the cursor enters a HUD area; the
+    /// region alone when the focused element has no text of its own.</summary>
+    public static string HudRegionWith(string region, string text) =>
+        string.IsNullOrEmpty(text) ? region : $"{region}, {text}";
+
+    /// <summary>A check box: "{label}, Schalter, an/aus".</summary>
+    public static string SwitchWithState(string label, bool on) =>
+        $"{label}, {SwitchControl}, {(on ? StateOn : StateOff)}";
+
     // ── Datenzentrum / Gamepad / Uebung / Menue ──────────────────────
     public static string ChooseDataCenter => L("Datenzentrum wählen.", "Choose a data center.", "Выбери дата-центр.");
     public static string GamepadCalibration => L("Gamepad-Kalibrierung. Escape zum Schließen.", "Gamepad calibration. Press Escape to close.", "Калибровка геймпада. Escape закрывает.");

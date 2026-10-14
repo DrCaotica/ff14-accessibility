@@ -3932,8 +3932,16 @@ public sealed partial class UIReaderService : IDisposable
         // on a duty-finder setting, so leaving that window ends the help dwell by
         // itself instead of leaving a stale control behind.
         _settingHelpOwner = 0;
-        _attributeHelpOwner = 0;
-        if (TryReadContentsFinderSettingRow(node, out var dutySetting))
+        if (TryReadChatPanelSelection(node, out var chatMessage))
+        {
+            // Chat message panel under the HUD cursor: Numpad8 / Numpad2 move a
+            // selection message by message without moving the focus node, so
+            // the generic reader (whole visible block) changed only on scrolling
+            // and read the FIRST visible message ([ChatProbe] 2026-10-11 15:06).
+            // The selected message with its position changes on every step.
+            text = chatMessage;
+        }
+        else if (TryReadContentsFinderSettingRow(node, out var dutySetting))
         {
             // Einstellungen der Inhaltssuche: Name UND Zustand ("Keine
             // Beschraenkungen, Schalter, aus"). Vor dem allgemeinen Pfad, der
@@ -4282,6 +4290,18 @@ public sealed partial class UIReaderService : IDisposable
         _lastFocusedNodePtr    = (nint)node;
         _lastFocusedNodeText   = text;
         _lastFocusedNodeStable = stable;
+        // HUD areas reached with Numpad1: name the area on entry. Decided here,
+        // on the real focus change, so moving inside an area adds no prefix.
+        var focusAddon = FindAddonNameForNode(node);
+        var hudRegion  = HudRegionName(focusAddon);
+        if (hudRegion != null)
+        {
+            text = DescribeHudRegionFocus(focusAddon, node, text);
+            if (HudRegionKey(focusAddon) != HudRegionKey(_lastFocusAddonName))
+                text = AccessibilityStrings.HudRegionWith(hudRegion, text);
+            text = PrefixSameFrameChatTab(focusAddon, text);
+        }
+        _lastFocusAddonName = focusAddon;
         // Real focus change: the new item counts as unannounced until the speak
         // below is actually reached (every return between here and there is a
         // suppression, and a suppressed name must not get a description).
@@ -4464,108 +4484,341 @@ public sealed partial class UIReaderService : IDisposable
         }
     }
 
-    // -- Laden: Mengenfeld ----------------------------------------------------
+    // -- HUD-Fokus (Numpad1 = PAD_HUDFOCUS) ------------------------------------
 
-    /// <summary>Set when a gil shop window opens, cleared once its quantity hint
-    /// has been spoken - so the hint comes once per visit, not on every row.</summary>
-    private bool _shopQuantityHintPending;
-
-    private void OnShopOpen(AddonEvent type, AddonArgs args) => _shopQuantityHintPending = true;
+    /// <summary>Addon of the previous real focus change - an area name is
+    /// spoken only when the cursor ENTERS a HUD area.</summary>
+    private string _lastFocusAddonName = string.Empty;
 
     /// <summary>
-    /// After the first row of a freshly opened shop: where the quantity field is.
-    /// Queued, not interrupting, so the row itself is heard first. Only when the
-    /// focused row really HAS a quantity field - the buyback list of the same
-    /// window does not.
+    /// Name of the HUD area Numpad1 put the cursor in, or null for any other
+    /// window. The game cycles exactly these five (log 2026-10-11 13:11-13:32,
+    /// same order on every round).
     /// </summary>
-    private unsafe void MaybeSpeakShopQuantityHint(AtkResNode* node)
+    private static string? HudRegionName(string addonName) => addonName switch
     {
-        if (!_shopQuantityHintPending) return;
-        var row = FindShopRow(node);
-        if (row == null || FindNumericInput(((AtkComponentNode*)row)->Component) == null) return;
-        if (FindAddonNameForNode(node) != "Shop") return;
+        "JobHudNotice" => AccessibilityStrings.HudRegionJobNotice,
+        "ScenarioTree" => AccessibilityStrings.HudRegionScenario,
+        "ChatLog"      => AccessibilityStrings.HudRegionChat,
+        "_ToDoList"    => AccessibilityStrings.HudRegionDutyList,
+        "_NaviMap"     => AccessibilityStrings.HudRegionMiniMap,
+        _              => null,
+    };
 
-        _shopQuantityHintPending = false;
-        _tolk.Speak(AccessibilityStrings.ShopQuantityHint);
+    /// <summary>
+    /// The area an addon belongs to for the entry announcement. The chat's
+    /// message panels (one per tab, ChatLogPanel_0..2 logged 14:38) are part of
+    /// the chat area: Numpad8 / Numpad2 move between them and the bar, and
+    /// that is a move inside the area, not an entry.
+    /// </summary>
+    private static string HudRegionKey(string addonName) =>
+        addonName.StartsWith("ChatLogPanel_", StringComparison.Ordinal) ? "ChatLog" : addonName;
+
+    // JobHudNotice (dump 2026-10-11 13:25): Button id=5 carries the job name
+    // ("Mönch", text id=2), the notice itself is a separate component id=4
+    // with text id=2 ("Chakra-Balken erweitert!") - the focus never touches it.
+    private const uint JobHudNoticeTextCompId = 4;
+    private const uint JobHudNoticeTextId     = 2;
+
+    // _NaviMap (dump 2026-10-11 13:15): the focus lands on CheckBox id=4, which
+    // has neither text nor a bound tooltip. AddonNaviMap.ReceiveEvent shows its
+    // mouse-over tooltip from string [0] of StringArrayType.AreaMap ([HudProbe]
+    // 13:30:45 / 13:32:15: same pointer as the addon's tooltip field,
+    // "Norden/Blickrichtung nach oben ausrichten").
+    private const uint NaviMapRotationCheckBoxId = 4;
+
+    // The other three focus stops of _NaviMap (OnSetup 0x141580FA0, measured
+    // with [HudProbe] 2026-10-11 13:41): Button id=2 (upper, ButtonClick param
+    // 4) and id=3 (lower, param 3) raise / lower the map zoom - NUM0 moved the
+    // zoom value 1.25 -> 1.5 on id=2 and 1.5 -> 1.25 on id=3. Neither has text
+    // or a tooltip. Comp id=14 is the weather icon: its mouse-over text is
+    // string [2] of StringArrayType.NaviMap (same pointer, "Regnerisch").
+    private const uint NaviMapZoomInButtonId  = 2;
+    private const uint NaviMapZoomOutButtonId = 3;
+    private const uint NaviMapWeatherIconId   = 14;
+
+    /// <summary>
+    /// Fills in what a sighted player sees on a focused HUD element that has no
+    /// text of its own. Returns <paramref name="text"/> unchanged otherwise.
+    /// </summary>
+    private unsafe string DescribeHudRegionFocus(string addonName, AtkResNode* node, string text)
+    {
+        var ptr = _gameGui.GetAddonByName(addonName);
+        if (ptr.IsNull) return text;
+        var addon = (AtkUnitBase*)(nint)ptr;
+
+        if (addonName == "JobHudNotice")
+        {
+            var wrap = FindTopLevelNode(addon, JobHudNoticeTextCompId);
+            if (wrap == null || (int)wrap->Type < 1000 || !wrap->IsVisible()) return text;
+            var comp = ((AtkComponentNode*)wrap)->Component;
+            if (comp == null) return text;
+            var notice = ReadComponentTextById(comp, JobHudNoticeTextId).Trim();
+            return notice.Length == 0 ? text : AccessibilityStrings.HudRegionWith(text, notice);
+        }
+
+        if (addonName == "ScenarioTree")
+        {
+            var owner = FindTopLevelOwner(addon, node, out _);
+            if (owner == null) return text;
+            if (owner->NodeId == ScenarioTreeMsqButtonId)
+            {
+                // The heading above the entry says whether the quest is accepted
+                // ("Aktueller ...") or still to be picked up ("Nächster ...").
+                var heading = ReadAddonNodeText(addon, ScenarioTreeHeadingId);
+                return heading.Length == 0 ? text : AccessibilityStrings.ScenarioTreeEntry(heading, text);
+            }
+            if (owner->NodeId is ScenarioTreeJobQuestButtonId or ScenarioTreeJobQuest2ButtonId)
+            {
+                // No text names this row on screen - its icon marks it as a job
+                // quest. The game's own name for that kind of quest is the
+                // quest's journal genre ("Mönch-Jobaufträge").
+                var genre = ScenarioTreeJobQuestGenre(text);
+                return genre.Length == 0 ? text : AccessibilityStrings.ScenarioTreeEntry(genre, text);
+            }
+            return text;
+        }
+
+        if (addonName == "ChatLog")
+            return DescribeChatLogFocus((AddonChatLog*)addon, node, text);
+
+        if (addonName == "_NaviMap")
+        {
+            var owner = FindTopLevelOwner(addon, node, out _);
+            if (owner == null || (int)owner->Type < 1000) return text;
+            var comp = ((AtkComponentNode*)owner)->Component;
+            if (comp == null) return text;
+            switch (owner->NodeId)
+            {
+                case NaviMapZoomInButtonId when comp->GetComponentType() == ComponentType.Button:
+                    return AccessibilityStrings.MiniMapZoomIn;
+                case NaviMapZoomOutButtonId when comp->GetComponentType() == ComponentType.Button:
+                    return AccessibilityStrings.MiniMapZoomOut;
+                case NaviMapWeatherIconId:
+                {
+                    var weather = ReadHudString(StringArrayType.NaviMap, 2);
+                    return weather.Length == 0 ? text : AccessibilityStrings.MiniMapWeather(weather);
+                }
+                case NaviMapRotationCheckBoxId when comp->GetComponentType() == ComponentType.CheckBox:
+                {
+                    var label = ReadHudString(StringArrayType.AreaMap, 0);
+                    return label.Length == 0 ? text
+                        : AccessibilityStrings.SwitchWithState(label, ((AtkComponentButton*)comp)->IsChecked);
+                }
+            }
+        }
+
+        return text;
     }
 
+    // ChatLog bottom bar (dump 2026-10-11 14:15, Numpad4 chain logged 14:21):
+    // input field id=5 -> channel drop-down id=3 -> buttons 13, 10, 9. None has
+    // text. AddonChatLog's setup (0x1412D5970, disassembly 2026-10-11) binds
+    // each button's mouse-over tooltip from the Addon sheet: node 9 = 1095
+    // "Neuer Reiter", 10 = 1096 "Chatlog-Einstellungen", 12 = 1097 (novice
+    // network list, hidden for non-members), 13 = 13736 "Chatlog verbergen",
+    // and the channel drop-down = 13737 "Chat-Modus wechseln". The rows are
+    // read here rather than through TooltipService: the window is built once
+    // at login, so after a plugin reload that live map has no entry for them.
+    // ClientStructs names node 9 AddTabComponentNode and 10
+    // SettingsComponentNode ([ChatProbe] 14:27:04 compared the pointers).
+    private static readonly Dictionary<uint, uint> ChatLogButtonLabelRows = new()
+    {
+        [9]  = 1095,
+        [10] = 1096,
+        [12] = 1097,
+        [13] = 13736,
+    };
+    private const uint ChatLogChannelDropDownLabelRow = 13737;
+
     /// <summary>
-    /// The quantity field of a gil shop row (Shop, dump 2026-10-05: a
-    /// NumericInput, node id=4, in every buy row, default 1, max 99).
-    ///
-    /// Measured with [ShopQtyProbe] 2026-10-05 19:45: NUM4 from the row puts the
-    /// focus on the field (id=5 inside the NumericInput, IsActive false); NUM0
-    /// starts editing (focus id=9, IsActive true) and NUM0 again ends it. The
-    /// chosen amount stays in the field, and confirming on the ROW then asks for
-    /// exactly that many ("3 Heiltränke für 84 Gil kaufen?", 19:51:40).
-    /// Value and editing state are read from the component, never from its
-    /// text, which is zero-padded while the tens digit is being edited ("04").
-    /// CurrentDigitMultiplier is 1 on the ones and 10 on the tens digit
-    /// (log 2026-10-05 20:01:35-37, switching back and forth while editing).
+    /// Names the focused element of the chat window's bottom bar: the input
+    /// field with its send channel, the channel drop-down, or one of the icon
+    /// buttons by the game's own tooltip text.
     /// </summary>
-    private unsafe bool TryReadShopQuantityFocus(AtkResNode* node, out string text)
+    private unsafe string DescribeChatLogFocus(AddonChatLog* chat, AtkResNode* node, string text)
+    {
+        var owner = FindTopLevelOwner(&chat->AtkUnitBase, node, out _);
+        if (owner == null || (int)owner->Type < 1000) return text;
+        var comp = ((AtkComponentNode*)owner)->Component;
+        if (comp == null) return text;
+
+        if (chat->TextInput != null && owner == (AtkResNode*)chat->TextInput->OwnerNode)
+        {
+            var channel = ReadChatChannel(chat);
+            return AccessibilityStrings.HudChannelInput(channel);
+        }
+        if (chat->ChannelSelectDropDown != null && owner == (AtkResNode*)chat->ChannelSelectDropDown->OwnerNode)
+        {
+            // NUM0 opens the list and the cursor walks its entries, which are
+            // children of the same drop-down component (log 2026-10-11 15:20:42-
+            // 15:20:57: id=6, a new node per Numpad2). Naming the closed control
+            // there replaced every entry with "Chat-Modus wechseln, ...".
+            if (chat->ChannelSelectDropDown->IsOpen) return text;
+            var label = LookupAddonText(ChatLogChannelDropDownLabelRow);
+            return label.Length == 0 ? text : AccessibilityStrings.DropdownDesc(label, ReadChatChannel(chat));
+        }
+        if (comp->GetComponentType() == ComponentType.Button
+            && ChatLogButtonLabelRows.TryGetValue(owner->NodeId, out var row))
+        {
+            var label = LookupAddonText(row);
+            return label.Length == 0 ? text : AccessibilityStrings.HudButton(label);
+        }
+        return text;
+    }
+
+    // WORKAROUND: the message panel's selection has no name in ClientStructs
+    // (LogViewer documents FirstLineVisible @76, LastLineVisible @80,
+    // TotalLineCount @92, nothing at 252), and no game function returning it
+    // is known. Measured with [ChatProbe] 2026-10-11 14:57-15:06 in two tabs:
+    // -1 while the cursor is outside the panel, TotalLineCount on entry (the
+    // newest message), Numpad8 -1, Numpad2 +1, and the game scrolls so it
+    // stays within FirstLineVisible..LastLineVisible. Approved by the user
+    // 2026-10-11 on condition that an implausible value is reported, never
+    // read as some other message. Re-measure after a game patch.
+    private const int ChatPanelSelectionOffset = 252;
+
+    /// <summary>Last implausible selection state logged, so the per-frame
+    /// reader writes one warning per state instead of one per frame.</summary>
+    private string _chatPanelBadState = string.Empty;
+
+    /// <summary>
+    /// Reads the message selected in a chat message panel (ChatLogPanel_N) as
+    /// "{message}, {n} von {total}". The panel's text (LogViewer.ChatText) holds
+    /// the whole messages FirstLineVisible..LastLineVisible in order, so the
+    /// selected one is message (selection - FirstLineVisible) of that text.
+    /// </summary>
+    private unsafe bool TryReadChatPanelSelection(AtkResNode* node, out string text)
     {
         text = string.Empty;
-        if (node == null) return false;
+        var addonName = FindAddonNameForNode(node);
+        if (!addonName.StartsWith("ChatLogPanel_", StringComparison.Ordinal)) return false;
+        var panel = (AddonChatLogPanel*)FindAddonForNode(node);
+        if (panel == null) return false;
 
-        AtkComponentNumericInput* input = null;
-        var cur = node->ParentNode;
-        for (var up = 0; up < 2 && cur != null && input == null; up++, cur = cur->ParentNode)
+        var viewer    = &panel->LogViewer;
+        var selection = *(int*)((byte*)viewer + ChatPanelSelectionOffset);
+        var first     = (int)viewer->FirstLineVisible;
+        var last      = (int)viewer->LastLineVisible;
+        var total     = (int)viewer->TotalLineCount;
+
+        // Measured -1 whenever the cursor is outside the panel. Should the focus
+        // reach the panel a frame before the game sets the selection, stay
+        // silent for that frame rather than read the whole block.
+        if (selection == -1) return true;
+
+        var messages = viewer->ChatText == null
+            ? null
+            : SplitChatPanelMessages(viewer->ChatText->NodeText.StringPtr.Value);
+        var index = selection - first;
+        if (selection < first || selection > last || last > total
+            || messages == null || index >= messages.Count)
         {
-            if ((int)cur->Type < 1000) continue;
-            var comp = ((AtkComponentNode*)cur)->Component;
-            if (comp != null && comp->GetComponentType() == ComponentType.NumericInput)
-                input = (AtkComponentNumericInput*)comp;
+            var state = $"{addonName} auswahl={selection} sichtbar={first}-{last}/{total} meldungen={messages?.Count ?? -1}";
+            if (state != _chatPanelBadState)
+            {
+                _chatPanelBadState = state;
+                _log.Warning($"[ChatPanel] Auswahl unplausibel: {state} (Offset {ChatPanelSelectionOffset} nach Patch neu messen).");
+            }
+            text = AccessibilityStrings.ChatPanelUnreadable;
+            return true;
         }
-        if (input == null || FindShopRow(node) == null || FindAddonNameForNode(node) != "Shop") return false;
+        _chatPanelBadState = string.Empty;
 
-        text = input->IsActive
-            ? AccessibilityStrings.ShopQuantityEditing(input->Value, input->CurrentDigitMultiplier)
-            : AccessibilityStrings.ShopQuantityField(input->Value);
-
-        var raw = $"value={input->Value} aktiv={input->IsActive} stelle={input->CurrentDigitMultiplier}";
-        if (raw != _lastShopQuantityRaw)
-        {
-            _lastShopQuantityRaw = raw;
-            _log.Info($"[Shop] Mengenfeld {raw}");
-        }
+        var message = messages[index];
+        text = AccessibilityStrings.ChatPanelMessage(message, selection, total);
         return true;
     }
 
-    private string _lastShopQuantityRaw = string.Empty;
-
     /// <summary>
-    /// Appends ", Menge 4" to a gil shop row whose quantity field holds more
-    /// than 1. A sighted player sees the number next to the price; without it
-    /// the row said only "112, Heiltrank" - the TOTAL for 4, which reads like
-    /// the price of one (user 2026-10-05). At 1 it stays silent: that is the
-    /// default on every row, and saying it on each would only be noise.
+    /// Splits a chat panel's text into its messages. Measured layout
+    /// ([ChatProbe] 2026-10-11 15:06, payload dump): every message is
+    /// colour-on, text, colour-off, then a text payload "\r" that ends it; the
+    /// game's own word wrap inside a message is a NewLine payload followed by
+    /// two spaces of indentation. Wraps become a single space, so a message is
+    /// read as one sentence. Icons, colours and links carry no text and drop out.
     /// </summary>
-    private unsafe string AppendShopRowQuantity(AtkResNode* node, string text)
+    private static unsafe List<string> SplitChatPanelMessages(byte* ptr)
     {
-        // Set only for a row linked to an item, and cleared on the quantity field
-        // itself, which already says its number.
-        if (!_shopRowItemActive || string.IsNullOrEmpty(text)) return text;
-
-        var row = FindShopRow(node);
-        if (row == null) return text;
-        var input = FindNumericInput(((AtkComponentNode*)row)->Component);
-        if (input == null || input->Value <= 1 || FindAddonNameForNode(node) != "Shop") return text;
-
-        return text + AccessibilityStrings.ShopRowQuantity(input->Value);
+        var messages = new List<string>();
+        if (ptr == null) return messages;
+        var se      = Dalamud.Memory.MemoryHelper.ReadSeStringNullTerminated((nint)ptr);
+        var current = new StringBuilder();
+        foreach (var payload in se.Payloads)
+        {
+            if (payload is Dalamud.Game.Text.SeStringHandling.Payloads.NewLinePayload)
+            {
+                current.Append(' ');
+                continue;
+            }
+            if (payload is not Dalamud.Game.Text.SeStringHandling.Payloads.TextPayload { Text: { } part }) continue;
+            var pieces = part.Split('\r');
+            for (var p = 0; p < pieces.Length; p++)
+            {
+                current.Append(pieces[p]);
+                if (p == pieces.Length - 1) break;
+                messages.Add(CollapseSpaces(current.ToString()));
+                current.Clear();
+            }
+        }
+        // Text after the last "\r" would be an unterminated message; measured
+        // texts always ended with "\r", so anything left over is kept as one.
+        if (current.ToString().Trim().Length > 0)
+            messages.Add(CollapseSpaces(current.ToString()));
+        return messages;
     }
 
-    /// <summary>The first NumericInput among a component's direct children, or null.</summary>
-    private static unsafe AtkComponentNumericInput* FindNumericInput(AtkComponentBase* comp)
+    private static string CollapseSpaces(string text) =>
+        System.Text.RegularExpressions.Regex.Replace(text, @"\s+", " ").Trim();
+
+    // ScenarioTree (dump 2026-10-11 13:46): heading Text id=11 ("Aktueller
+    // Hauptszenario-Auftrag", Addon 5671; 5670 = "Nächster ..."), main scenario
+    // entry Button id=13, job quest entries Button id=7 (visible, "Ätherische
+    // Harmonie") and id=8 (hidden, empty). Numpad2 moves from 13 to 7; NUM0 on
+    // either opens the map (log 13:44:17 / 13:50:06). AgentScenarioTreeData
+    // documents CommandType 3 = MSQ on map, 4 = job quest on map.
+    private const uint ScenarioTreeHeadingId        = 11;
+    private const uint ScenarioTreeMsqButtonId      = 13;
+    private const uint ScenarioTreeJobQuestButtonId  = 7;
+    private const uint ScenarioTreeJobQuest2ButtonId = 8;
+
+    /// <summary>
+    /// Journal genre of the job quest the scenario guide shows under
+    /// <paramref name="questName"/> ("Mönch-Jobaufträge"), taken from
+    /// AgentScenarioTreeData.JobQuestIds. Empty when no listed job quest has that
+    /// name - the id is only trusted when it names the same quest as the row.
+    /// </summary>
+    private unsafe string ScenarioTreeJobQuestGenre(string questName)
     {
-        for (var i = 0; comp != null && i < comp->UldManager.NodeListCount; i++)
+        var agent = AgentScenarioTree.Instance();
+        if (agent == null || agent->Data == null || questName.Length == 0) return string.Empty;
+        var quests = _data.GetExcelSheet<Lumina.Excel.Sheets.Quest>();
+        foreach (var id in agent->Data->JobQuestIds)
         {
-            var child = comp->UldManager.NodeList[i];
-            if (child == null || (int)child->Type < 1000) continue;
-            var c = ((AtkComponentNode*)child)->Component;
-            if (c != null && c->GetComponentType() == ComponentType.NumericInput) return (AtkComponentNumericInput*)c;
+            if (id == 0) continue;
+            // Agent quest ids are the Quest sheet row minus 0x10000 (66600 =
+            // "Ätherische Harmonie" = job quest id 1064, offline sheet 2026-10-11).
+            if (!quests.TryGetRow(id + 0x10000u, out var quest)) continue;
+            if (quest.Name.ExtractText() != questName) continue;
+            return quest.JournalGenre.ValueNullable?.Name.ExtractText() ?? string.Empty;
         }
-        return null;
+        _log.Info($"[HudFocus] Szenario-Leitfaden: keine Job-Quest '{questName}' in JobQuestIds "
+                  + $"[{string.Join(",", agent->Data->JobQuestIds.ToArray())}]");
+        return string.Empty;
+    }
+
+    /// <summary>One string of a game string array, empty (and logged) when the
+    /// array or the slot is missing.</summary>
+    private unsafe string ReadHudString(StringArrayType type, int index)
+    {
+        var stage = AtkStage.Instance();
+        var strings = stage == null ? null : stage->GetStringArrayData(type);
+        if (strings == null || strings->AtkArrayData.Size <= index || strings->StringArray[index].Value == null)
+        {
+            _log.Warning($"[HudFocus] Text {type}[{index}] fehlt.");
+            return string.Empty;
+        }
+        return Dalamud.Memory.MemoryHelper.ReadSeStringNullTerminated((nint)strings->StringArray[index].Value).TextValue.Trim();
     }
 
     // -- Charaktererstellung: Auswahl folgt dem Fokus (V4.93) ----------------
@@ -11575,10 +11828,11 @@ public sealed partial class UIReaderService : IDisposable
     /// </summary>
     private unsafe void OnChatLogUpdate(AddonEvent type, AddonArgs args)
     {
-        if (!_config.EchoChatInput) return;
-
         var addon = (AddonChatLog*)(nint)args.Addon;
         if (addon == null) return;
+        AnnounceHudChatTab(addon);
+
+        if (!_config.EchoChatInput) return;
         var input = addon->TextInput;
         if (input == null) return;
 
@@ -11629,6 +11883,86 @@ public sealed partial class UIReaderService : IDisposable
             _lastChatEcho = text;
             _log.Info($"[Chat] Echo: '{TolkService.Sanitize(text)}'");
         }
+    }
+
+    /// <summary>Tab index the chat window showed on the previous frame, -1
+    /// before the first frame. Kept current on every frame, so only a change
+    /// made while the cursor is in the chat window is spoken.</summary>
+    private int _hudChatTabIndex = -1;
+
+    /// <summary>
+    /// Speaks the new tab when Numpad7 / Numpad9 switch it while Numpad1 has put
+    /// the cursor in the chat window ([ChatProbe] 2026-10-11 14:07:11 / 14:07:14:
+    /// TabIndex 0 -> 2 -> 0 of 3, wrapping, nothing spoken). The new chat system
+    /// already follows the tab on its own (Plugin.FollowChatTab), so this only
+    /// speaks while the legacy system is the one talking.
+    /// </summary>
+    private unsafe void AnnounceHudChatTab(AddonChatLog* chat)
+    {
+        int index = chat->TabIndex;
+        if (index == _hudChatTabIndex) return;
+        var first = _hudChatTabIndex < 0;
+        _hudChatTabIndex = index;
+        if (first || !_config.UseLegacyChatSystem || !IsChatWindowFocused()) return;
+
+        if (index >= chat->TabCount)
+        {
+            _log.Warning($"[HudFocus] Chat-Reiter {index} ausserhalb TabCount={chat->TabCount}.");
+            return;
+        }
+        var name = TolkService.Sanitize(chat->TabNames[index].ToString()).Trim();
+        var frame = GameFrame();
+        _log.Info($"[HudFocus] Chat-Reiter {index + 1}/{chat->TabCount} '{name}'");
+        if (name.Length == 0) return;
+        _hudChatTabSpeech = AccessibilityStrings.ChatLogTab(name, index + 1, chat->TabCount);
+        _hudChatTabFrame  = frame;
+        _tolk.SpeakInterrupt(_hudChatTabSpeech);
+    }
+
+    /// <summary>Last spoken tab announcement and the game frame it was made in.</summary>
+    private string _hudChatTabSpeech = string.Empty;
+    private uint   _hudChatTabFrame  = uint.MaxValue;
+
+    /// <summary>
+    /// Switching the tab from inside the message panel also moves the game's
+    /// cursor back to the input field ([ChatProbe] 14:38:32: FocusStop on the
+    /// panel, then the focus line 7 ms after the tab line). The focus speech
+    /// interrupted the tab name, so a focus change in the SAME game frame as a
+    /// tab change carries the tab name in front. Same frame measured for all
+    /// three tabs (log 2026-10-11 14:42:16, 14:42:50, 14:43:12).
+    /// </summary>
+    private string PrefixSameFrameChatTab(string focusAddon, string text)
+    {
+        if (HudRegionKey(focusAddon) != "ChatLog" || _hudChatTabSpeech.Length == 0) return text;
+        if (GameFrame() != _hudChatTabFrame) return text;
+        return AccessibilityStrings.HudRegionWith(_hudChatTabSpeech, text);
+    }
+
+    /// <summary>The game's frame counter (Framework.FrameCounter).</summary>
+    private static unsafe uint GameFrame()
+    {
+        var fw = FFXIVClientStructs.FFXIV.Client.System.Framework.Framework.Instance();
+        return fw == null ? 0 : fw->FrameCounter;
+    }
+
+    /// <summary>
+    /// Whether the game's cursor is in the chat window - its bar or its message
+    /// panel. Only the LAST entry of the focused-units list counts: ChatLog can
+    /// stay in the list while the cursor is elsewhere ([ChatProbe] 2026-10-11
+    /// 14:33:15 "[ChatLog,ScenarioTree]", 14:33:16 "[ChatLog,InputString]"),
+    /// and every logged list ended with the window the cursor was in.
+    /// </summary>
+    private static unsafe bool IsChatWindowFocused()
+    {
+        var mgr = RaptureAtkUnitManager.Instance();
+        if (mgr == null) return false;
+        var list = mgr->AtkUnitManager.FocusedUnitsList;
+        var count = Math.Min((int)list.Count, list.Entries.Length);
+        if (count == 0) return false;
+        var unit = list.Entries[count - 1].Value;
+        if (unit == null) return false;
+        var name = unit->NameString;
+        return name == "ChatLog" || name.StartsWith("ChatLogPanel_", StringComparison.Ordinal);
     }
 
 #if DEBUG
