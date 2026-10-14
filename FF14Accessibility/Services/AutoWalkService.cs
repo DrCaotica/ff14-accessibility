@@ -2237,13 +2237,22 @@ public sealed class AutoWalkService : IDisposable
         var isBuilding = progress >= 0f;
         _lastMeshProgress = progress;
 
+        // On the title screen and in character select vnavmesh also builds a
+        // short mesh (~30 ms) for the territory of the last played character -
+        // TerritoryType still reads that zone there (log 2026-10-10 14:28: 133,
+        // IsLoggedIn=False, no LocalPlayer). Without a character nobody can walk,
+        // so the progress is tracked but not spoken. LocalPlayer and not
+        // IsLoggedIn: Dalamud only reports the login once LocalPlayer exists, and
+        // the in-game build started 0.4-0.8 s after that (13:09, 14:29).
+        var announce = _objectTable.LocalPlayer != null;
+
         if (isBuilding)
         {
             if (!wasBuilding)
             {
                 _lastSpokenMeshStep = 0;   // step 0 counts as spoken, so 0 % stays quiet
-                _log.Info("[Nav] Wegenetz-Aufbau gestartet.");
-                _tolk.SpeakInterrupt(AccessibilityStrings.MeshLoading);
+                _log.Info($"[Nav] Wegenetz-Aufbau gestartet. (Spieler={announce}{(announce ? "" : ", Ansage unterdrueckt")})");
+                if (announce) _tolk.SpeakInterrupt(AccessibilityStrings.MeshLoading);
                 return;
             }
 
@@ -2252,7 +2261,7 @@ public sealed class AutoWalkService : IDisposable
             {
                 _lastSpokenMeshStep = step;
                 _log.Info($"[Nav] Wegenetz-Aufbau: {step * 20} % (progress={progress:F2})");
-                _tolk.SpeakInterrupt(AccessibilityStrings.MeshPercent(step * 20));
+                if (announce) _tolk.SpeakInterrupt(AccessibilityStrings.MeshPercent(step * 20));
             }
             return;
         }
@@ -2261,8 +2270,8 @@ public sealed class AutoWalkService : IDisposable
 
         _lastSpokenMeshStep = -1;
         var ready = _nav.IsReady;
-        _log.Info($"[Nav] Wegenetz-Aufbau beendet, bereit={ready}");
-        _tolk.SpeakInterrupt(ready ? AccessibilityStrings.MeshReady : AccessibilityStrings.MeshAborted);
+        _log.Info($"[Nav] Wegenetz-Aufbau beendet, bereit={ready} (Spieler={announce}{(announce ? "" : ", Ansage unterdrueckt")})");
+        if (announce) _tolk.SpeakInterrupt(ready ? AccessibilityStrings.MeshReady : AccessibilityStrings.MeshAborted);
     }
 
     // ── Ziel folgen (kontinuierlich) ─────────────────────────────────

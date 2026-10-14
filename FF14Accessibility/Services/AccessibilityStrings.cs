@@ -15,31 +15,25 @@ public static partial class AccessibilityStrings
     // NOT the OS culture directly. Auto still falls back to the OS culture.
     private static bool IsGerman => Loc.IsGerman;
 
-    /// <summary>
-    /// Picks the text for the active announcement language.
-    ///
-    /// The Russian text is optional on purpose: a string that has not been
-    /// translated yet keeps working and simply stays English. That way the
-    /// Russian pass can grow one section at a time instead of having to land
-    /// as one lump; the untranslated ones are English rather than silent.
-    /// </summary>
-    internal static string L(string de, string en, string? ru = null)
-        => Loc.IsRussian ? ru ?? en : IsGerman ? de : en;
+    public static string TitleScreen => IsGerman ? "Titelbildschirm" : "Title screen";
+    public static string MainMenu => IsGerman ? "Hauptmenü" : "Main menu";
 
-    /// <summary>
-    /// Authored character descriptions keep the upstream DE/EN table. Russian
-    /// translations match the complete English text in a separate offline catalog.
-    /// A new or changed entry keeps its original wording until translated.
-    /// </summary>
-    internal static string LocText(string de, string en)
-        => L(de, en, Loc.IsRussian ? RussianCharacterText.Find(en) : null);
-
-    public static string TitleScreen => L("Titelbildschirm", "Title screen", "Титульный экран");
-    public static string MainMenu => L("Hauptmenü", "Main menu", "Главное меню");
-    public static string Back => L("Zurück", "Back", "Назад");
-    public static string NoHelpAvailable => L("Keine Hilfe verfügbar", "No help available", "Справка недоступна");
-    public static string HelpForTitle => L("Enter öffnet das Hauptmenü. Strg+F1 sagt diese Hilfe erneut an.", "Press Enter to open the main menu. Press Ctrl+F1 to hear this help again.", "Enter открывает главное меню. Ctrl+F1 повторит эту справку.");
-    public static string HelpForTitleMenu => L("Pfeil hoch und runter zum Wechseln, Enter zum Bestätigen, Escape zurück, Strg+F1 für Hilfe.", "Use up and down arrow keys to move, Enter to confirm, Escape to go back, Ctrl+F1 for help.", "Стрелки вверх и вниз переключают, Enter подтверждает, Escape возвращает назад, Ctrl+F1 — справка.");
+    /// <summary>Icon button in a character select row; opens CharaSelectCharaConfigMain (backup of that character's settings).
+    /// Wording follows the game's own entry for the same function in the row's context menu
+    /// ("Charaktereinstellungen sichern", log 2026-10-10 14:35:57).</summary>
+    public static string CharaSelectCharaConfigButton =>
+        IsGerman ? "Charaktereinstellungen sichern, Knopf" : "Back up character settings, button";
+    /// <summary>Icon button next to "New Character"; opens CharaSelectSystemConfigMain (backup of the system settings).</summary>
+    public static string CharaSelectSystemConfigButton =>
+        IsGerman ? "Systemkonfiguration sichern, Knopf" : "Back up system configuration, button";
+    public static string Back => IsGerman ? "Zurück" : "Back";
+    public static string NoHelpAvailable => IsGerman ? "Keine Hilfe verfügbar" : "No help available";
+    public static string HelpForTitle => IsGerman
+        ? "Enter öffnet das Hauptmenü. Strg+F1 sagt diese Hilfe erneut an."
+        : "Press Enter to open the main menu. Press Ctrl+F1 to hear this help again.";
+    public static string HelpForTitleMenu => IsGerman
+        ? "Pfeil hoch und runter zum Wechseln, Enter zum Bestätigen, Escape zurück, Strg+F1 für Hilfe."
+        : "Use up and down arrow keys to move, Enter to confirm, Escape to go back, Ctrl+F1 for help.";
 
     public static string Confirmed(string item) =>
         L($"Auswahl bestätigt: {item}", $"Confirmed: {item}", $"Выбор подтверждён: {item}");
