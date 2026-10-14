@@ -375,6 +375,15 @@ public sealed partial class UIReaderService : IDisposable
         // ohnehin unhoerbar, und den Inhalt sagt ItemCompareService gesammelt auf
         // Strg+Umschalt+F12 an - genau die Loesung, die V5.14 fuer ItemDetail fand.
         "ItemDetailCompare",
+        // LoadingTips: one text node only, and it held the same
+        // "Nach Mindeststufe sortieren" at every login 2026-10-05..10 (11 of 11,
+        // dalamud(.old).log; dump 2026-10-10 13:24: Vis=False, Nodes=3). The game
+        // never changed that text and never showed the window afterwards. It is
+        // reported visible for a moment at PostSetup, like the rest of the HUD,
+        // but is set up 3-4 ms BEFORE "Hud" starts the login quiet (OnHudPreSetup),
+        // so it was spoken at every login. Earlier markers (FadeBack/NowLoading)
+        // also fire on logout to the title screen and would mute the title menu.
+        "LoadingTips",
         // ActionDetail — DASSELBE MUSTER (Log 2026-09-14 09:05–09:06, Kommandoliste
         // Eigenschaften): bei jedem Skill-/Trait-Fokus sprach der Scanner
         // Job-Kuerzel, "St. N", Beschreibung und Name EINZELN mit SpeakInterrupt;
@@ -586,6 +595,7 @@ public sealed partial class UIReaderService : IDisposable
         _addonLifecycle.RegisterListener(AddonEvent.PostUpdate,       OnAnyAddonUpdate);
         _addonLifecycle.RegisterListener(AddonEvent.PostReceiveEvent, OnAnyAddonReceive);
         _addonLifecycle.RegisterListener(AddonEvent.PreFinalize,      OnAnyAddonClose);
+        _addonLifecycle.RegisterListener(AddonEvent.PreSetup,   "Hud", OnHudPreSetup);
 
         // -- Talk / TalkSubtitle (NPC-Dialoge, Untertitel) ---------
         _addonLifecycle.RegisterListener(AddonEvent.PostUpdate, "Talk", OnTalkUpdate);
@@ -859,6 +869,24 @@ public sealed partial class UIReaderService : IDisposable
 
     /// <summary>True while the post-login quiet period is running.</summary>
     private bool InLoginQuiet => DateTime.UtcNow < _quietUntil;
+
+    // Dalamud's ClientState.Login fires too late to cover the HUD build: it
+    // waits for a set Condition flag AND a LocalPlayer (Dalamud
+    // ClientState.OnFrameworkUpdate), which arrive 2-3 s after the windows.
+    // Log 2026-10-10: HUD built 12:57:06.558-.626 (SEITE AN SEITE, INVENTAR,
+    // Ziel, Alte Herausforderungen neu erleben, ...), Login 12:57:08.934.
+    // The game's "Hud" addon is set up exactly once per login, at the very
+    // start of that build: eight logins 2026-10-05..10 in dalamud(.old).log,
+    // never on zone change, plugin reload or logout to the title screen
+    // (FadeBack/NowLoading do appear there, so they are no login marker).
+    // PreSetup so the quiet is already running for Hud's own PostSetup.
+    // The later Login call still restarts the timer, so the quiet ENDS as
+    // before; only its start moves forward.
+    private void OnHudPreSetup(AddonEvent type, AddonArgs args)
+    {
+        _log.Info("[Accessibility] Hud wird aufgebaut (Anmeldung).");
+        BeginLoginQuiet(_config.LoginQuietSeconds);
+    }
 
     private unsafe void OnAnyAddonOpen(AddonEvent type, AddonArgs args)
     {
@@ -15689,6 +15717,7 @@ public sealed partial class UIReaderService : IDisposable
         _addonLifecycle.UnregisterListener(AddonEvent.PostUpdate,       OnAnyAddonUpdate);
         _addonLifecycle.UnregisterListener(AddonEvent.PostReceiveEvent, OnAnyAddonReceive);
         _addonLifecycle.UnregisterListener(AddonEvent.PreFinalize,      OnAnyAddonClose);
+        _addonLifecycle.UnregisterListener(AddonEvent.PreSetup,   "Hud", OnHudPreSetup);
         _addonLifecycle.UnregisterListener(AddonEvent.PostUpdate, "Talk",         OnTalkUpdate);
         _addonLifecycle.UnregisterListener(AddonEvent.PostUpdate, "TalkSubtitle", OnTalkUpdate);
         _addonLifecycle.UnregisterListener(AddonEvent.PostUpdate, "_BattleTalk",  OnTalkUpdate);
