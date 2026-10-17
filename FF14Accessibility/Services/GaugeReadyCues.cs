@@ -164,7 +164,6 @@ public static class GaugeReadyCues
                 GaugeReadyCueId.Ruby,
                 GaugeReadyCueId.Topaz,
                 GaugeReadyCueId.Emerald,
-                GaugeReadyCueId.AllGems,
                 GaugeReadyCueId.Aetherflow,
             }),
             (Job("Beschwörer", "Summoner", "Призыватель"), new[]
@@ -172,7 +171,6 @@ public static class GaugeReadyCues
                 GaugeReadyCueId.Ruby,
                 GaugeReadyCueId.Topaz,
                 GaugeReadyCueId.Emerald,
-                GaugeReadyCueId.AllGems,
                 GaugeReadyCueId.Aetherflow,
             }),
             (Job("Gelehrter", "Scholar", "Учёный"), new[]

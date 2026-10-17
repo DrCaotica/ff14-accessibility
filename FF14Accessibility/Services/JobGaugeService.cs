@@ -48,6 +48,17 @@ namespace FF14Accessibility.Services;
 /// </para>
 ///
 /// <para>
+/// ONE SUMMON AT A TIME (user 2026-10-17: the primals may be announced only when
+/// they can really be summoned; they cannot all be summoned together; do not say
+/// "all three ready", because more primals can exist later). The ready bits turn
+/// on together and only mean the gem is charged. <c>SummonTimer</c> is the
+/// current summon's remaining time and <c>AttunementCount</c> is the elemental
+/// attunement already in progress (installed SummonerGauge, 2026-10-13). A
+/// charged gem is spoken only while both are zero. No combined "all ready"
+/// phrase is spoken. Aetherflow stays its own edge.
+/// </para>
+///
+/// <para>
 /// The action ids themselves ARE constants, and there is no way around it: the
 /// gauge exposes bare bits with no reference back to an action, so the link
 /// between "this bit" and "that summon" has to be stated once. Only the ids are
@@ -303,11 +314,12 @@ public sealed partial class JobGaugeService
     }
 
     /// <summary>
-    /// Summoner and Arcanist. Reads <see cref="SMNGauge"/>; the ready flags come
-    /// straight from the game's own AetherFlags bit field, so no availability is
-    /// recomputed here (FFXIVClientStructs SummonerGauge, offset 15). Same bits
-    /// mean gem (Rubin/Topas/Smaragd) or primal (Ifrit/Titan/Garuda); the gem
-    /// action gates the edge, the primal action picks the spoken name.
+    /// Summoner and Arcanist. Reads <see cref="SMNGauge"/>. The ready flags come
+    /// straight from the game's own AetherFlags bit field (FFXIVClientStructs
+    /// SummonerGauge, offset 15). Same bits mean gem or primal; the gem action
+    /// gates the edge, the primal action picks the spoken name. A charged bit is
+    /// not spoken while <see cref="SMNGauge.SummonTimerRemaining"/> or
+    /// <see cref="SMNGauge.AttunementCount"/> shows a summon already in progress.
     /// </summary>
     private void CollectSummoner(byte level)
     {
@@ -316,19 +328,13 @@ public sealed partial class JobGaugeService
 
         // Gate on the gem summons so Hermetiker / SMN below 30 still hear the
         // rising edge; speak the primal name once that action is usable.
-        Edge("smn.ruby", ActionRuby, level, g.IsIfritReady, SummonReadyLabel(level, ActionIfrit,
+        // Occupancy comes from the gauge, not from a recomputed action cost.
+        Edge("smn.ruby", ActionRuby, level, SummonReadyNow(g.IsIfritReady, g), SummonReadyLabel(level, ActionIfrit,
             AccessibilityStrings.GaugeRubyReady, AccessibilityStrings.GaugeIfritReady), GaugeReadyCueId.Ruby);
-        Edge("smn.topaz", ActionTopaz, level, g.IsTitanReady, SummonReadyLabel(level, ActionTitan,
+        Edge("smn.topaz", ActionTopaz, level, SummonReadyNow(g.IsTitanReady, g), SummonReadyLabel(level, ActionTitan,
             AccessibilityStrings.GaugeTopazReady, AccessibilityStrings.GaugeTitanReady), GaugeReadyCueId.Topaz);
-        Edge("smn.emerald", ActionEmerald, level, g.IsGarudaReady, SummonReadyLabel(level, ActionGaruda,
+        Edge("smn.emerald", ActionEmerald, level, SummonReadyNow(g.IsGarudaReady, g), SummonReadyLabel(level, ActionGaruda,
             AccessibilityStrings.GaugeEmeraldReady, AccessibilityStrings.GaugeGarudaReady), GaugeReadyCueId.Emerald);
-
-        // Like Samurai "drei Sen": one extra edge when every learned gem track
-        // is ready at once ("Leisten voll" / Karfunkel-Primae rufbar).
-        var allGems = Usable(ActionRuby, level) && Usable(ActionTopaz, level)
-            && Usable(ActionEmerald, level)
-            && g.IsIfritReady && g.IsTitanReady && g.IsGarudaReady;
-        Edge("smn.allgems", allGems, AccessibilityStrings.GaugeAllGemsReady, GaugeReadyCueId.AllGems);
 
 #if DEBUG
         // Einmal je Stufe: was das Gatter gerade durchlaesst. Zeigt im Log
@@ -359,6 +365,20 @@ public sealed partial class JobGaugeService
     /// (what sits on the hotbar after the job upgrade).</summary>
     private string SummonReadyLabel(byte level, uint primalAction, string gemLabel, string primalLabel) =>
         Usable(primalAction, level) ? primalLabel : gemLabel;
+
+    /// <summary>
+    /// A charged gem can be summoned only while no summon already occupies the
+    /// slot. <paramref name="gemCharged"/> is one AetherFlags ready bit.
+    /// <see cref="SMNGauge.SummonTimerRemaining"/> counts down the current
+    /// summon. <see cref="SMNGauge.AttunementCount"/> is the elemental
+    /// attunement already being spent. Either one means another primal cannot
+    /// be summoned yet. No action cost is compared.
+    /// </summary>
+    internal static bool SummonReadyNow(bool gemCharged, ushort summonTimerRemaining, byte attunementCount) =>
+        gemCharged && summonTimerRemaining == 0 && attunementCount == 0;
+
+    private static bool SummonReadyNow(bool gemCharged, SMNGauge gauge) =>
+        SummonReadyNow(gemCharged, gauge.SummonTimerRemaining, gauge.AttunementCount);
 
     /// <summary>
     /// Samurai. Reads <see cref="SAMGauge"/> — Sen flags, Kenki, MeditationStacks,
@@ -526,19 +546,15 @@ public sealed partial class JobGaugeService
 
         // Same gem gate and name switch as the rising-edge path.
         var parts = new List<string>();
-        if (Usable(ActionRuby, lvl) && g.IsIfritReady)
+        if (Usable(ActionRuby, lvl) && SummonReadyNow(g.IsIfritReady, g))
             parts.Add(SummonReadyLabel(lvl, ActionIfrit,
                 AccessibilityStrings.GaugeRubyReady, AccessibilityStrings.GaugeIfritReady));
-        if (Usable(ActionTopaz, lvl) && g.IsTitanReady)
+        if (Usable(ActionTopaz, lvl) && SummonReadyNow(g.IsTitanReady, g))
             parts.Add(SummonReadyLabel(lvl, ActionTitan,
                 AccessibilityStrings.GaugeTopazReady, AccessibilityStrings.GaugeTitanReady));
-        if (Usable(ActionEmerald, lvl) && g.IsGarudaReady)
+        if (Usable(ActionEmerald, lvl) && SummonReadyNow(g.IsGarudaReady, g))
             parts.Add(SummonReadyLabel(lvl, ActionGaruda,
                 AccessibilityStrings.GaugeEmeraldReady, AccessibilityStrings.GaugeGarudaReady));
-
-        if (Usable(ActionRuby, lvl) && Usable(ActionTopaz, lvl) && Usable(ActionEmerald, lvl)
-            && g.IsIfritReady && g.IsTitanReady && g.IsGarudaReady)
-            parts.Add(AccessibilityStrings.GaugeAllGemsReady);
 
         if (Usable(ActionFester, lvl) && g.AetherflowStacks > 0)
             parts.Add(AccessibilityStrings.GaugeAetherflowReady);

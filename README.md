@@ -7,6 +7,15 @@ Spieler** zugänglich macht: Menüs, Dialoge, Quests, Navigation, Inventar,
 Kampf und Aktionsleisten werden per Screenreader (NVDA) vorgelesen und mit
 Tönen unterstützt — inklusive Braillezeile und automatischem Laufen.
 
+## Neu in 6.08.129
+
+Update im Spiel: Optionsmenü, Aktualisierung, Nach Aktualisierung suchen.
+Gesprochene Version 6.08.129. Der Installer bleibt 1.2.2.
+
+Beschwörer: eine Primae wird nur angesagt, wenn sie jetzt beschworen werden kann.
+Der Satz „alle drei bereit“ entfällt. Ätherfluss bleibt.
+[Ausführlich](docs/releases/6.08.129.md).
+
 ## Neu in 6.08.128
 
 Update im Spiel: Optionsmenü, Aktualisierung, Nach Aktualisierung suchen.

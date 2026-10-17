@@ -235,8 +235,9 @@ public sealed partial class Plugin : IDalamudPlugin
     // 6.08.18 lokal: Chat-Absender Kontextmenü (Strg+Umschalt+BildAuf) + Numpad3-Ziel.
     // 6.08.19: Charakterauswahl — eine Ansage (Name, Job, Ort) statt Scan-Sturm.
     // 6.08.20: Mitstreiter-Taste (PR 27 Port) — Strg+Umschalt+C öffnet/vorliest.
+    // 6.08.129: Beschwörer sagt eine Primae nur, wenn sie jetzt beschworen werden kann.
     // 6.08.128: Windäther-Kategorie erst, wenn das Menü Windätherquellen frei ist.
-    private const string PluginVersion    = "6.08.128";
+    private const string PluginVersion    = "6.08.129";
     // Der Tag nennt, was diese Fassung MITBRINGT, nicht woher sie stammt: die
     // russische Schicht auf dem Stand des Autors 6.08.35 (Auftragstext im
     // Quest-Tracker des Autors, siehe package-Schritt).

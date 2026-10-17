@@ -712,7 +712,8 @@ public sealed class Configuration : IPluginConfiguration
 
     // Job-Anzeige (User-Wunsch 2026-08-31): sagt an, wenn in der Job-eigenen
     // Leiste etwas WIEDER VERFÜGBAR wird - beim Beschwörer also Ifrit, Titan,
-    // Garuda und der Ätherfluss. Nur die steigende Flanke, ausdrücklich nach
+    // Garuda und der Ätherfluss. Eine Primae nur, wenn sie jetzt beschworen
+    // werden kann (2026-10-17). Kein Sammelsatz „alle drei bereit“. Nur die steigende Flanke, ausdrücklich nach
     // Ansage des Users ("immer brauche ich die anzeigen bzw ansagen nicht") -
     // aber in UND außer Kampf ("die meldungen ob was bereit ist kann auch
     // ausserhalb vom kampf kommen", 2026-08-31). Gesprochen wird über die WARNSTIMME (SAPI), weil NVDA

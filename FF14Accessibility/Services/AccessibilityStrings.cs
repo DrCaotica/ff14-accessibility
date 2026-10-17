@@ -3785,6 +3785,8 @@ public static partial class AccessibilityStrings
         L("Topas bereit", "Topaz ready", "Топаз готов");
     public static string GaugeEmeraldReady =>
         L("Smaragd bereit", "Emerald ready", "Изумруд готов");
+    // Retired 2026-10-17. The player cannot summon every charged primal at once,
+    // and a later patch can add more than three. Do not speak this phrase.
     public static string GaugeAllGemsReady =>
         L("alle drei bereit", "all three ready", "все три готовы");
     // Die Namen der Primae sind Eigennamen und in beiden Sprachen gleich; die

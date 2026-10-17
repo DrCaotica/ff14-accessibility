@@ -7,6 +7,15 @@ players**: menus, dialogues, quests, navigation, inventory, combat and
 hotbars are read aloud via screen reader (NVDA) and supported with audio
 cues — including braille display output and automatic walking.
 
+## New in 6.08.129
+
+In-game update: options menu, update, search for an update.
+Spoken version 6.08.129. The installer stays 1.2.2.
+
+Summoner: a primal is announced only when it can be summoned now.
+The phrase “all three ready” is gone. Aetherflow stays.
+[Details](docs/releases/6.08.129.md).
+
 ## New in 6.08.128
 
 In-game update: options menu, update, search for an update.

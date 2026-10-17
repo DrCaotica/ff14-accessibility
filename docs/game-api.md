@@ -2892,8 +2892,21 @@ Karfunkel-Aktionen (25802 St.6, 25803 St.15, 25804 St.22, ClassJob-26-Erbe),
 damit Hermetiker und SMN unter 30 hören; gesprochen wird „Rubin/Topas/Smaragd
 bereit“, sobald die Primae-Aktion nutzbar ist (25805/25806/25807 St.30/35/45)
 stattdessen „Ifrit/Titan/Garuda bereit“. Job 26 und 27 teilen denselben
-Collect/Announce-Pfad. Zusätzlich Flanke „alle drei bereit“, wenn alle drei
-Bits und alle drei Karfunkel-Stufen erfüllt sind.
+Collect/Announce-Pfad.
+
+**Nur wenn die Beschwörung jetzt geht (Code 2026-10-17, Struct vom 13.10.2026):**
+Die drei Ready-Bits können zusammen an sein. Sie sagen, dass die Primae geladen
+ist, nicht dass ihr Knopf jetzt gedrückt werden kann. `SummonTimer` (ushort,
+Offset 8, Millisekunden) ist die Restzeit der laufenden Beschwörung.
+`AttunementCount` (Bits 2–7 im Byte bei Offset 14) ist die laufende elementare
+Einstimmung. Eine Primae wird nur angesagt, wenn ihr Bit an ist und beide Werte
+0 sind. Kosten vom Typ 71 werden nicht verglichen. Der Satz „alle drei bereit“
+wird nicht mehr gesprochen und steht nicht mehr im Ton-Menü. Es gibt keinen
+Ersatzsatz für „alle“. Der Enum-Wert `AllGems` bleibt, damit die Töne der
+späteren Anzeigen nicht verrutschen. Ätherfluss bleibt eine eigene Flanke.
+Ob `GetActionStatus` für diese Aktionen Zielgründe meldet, ist weiterhin nicht
+gemessen. Die Ansage liest die Anzeigenfelder. In einer laufenden Sitzung ist
+dieser Zeitpunkt noch nicht gemessen.
 - **Zustaende/Aufzaehlungen**: AST `DrawnCards`, SAM `Sen`, MNK `BeastChakra`/`Nadi`,
   VPR `DreadCombo`, DRK `DeliriumComboStep`, BRD `Coda`
 

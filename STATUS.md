@@ -27,7 +27,29 @@ Dalamud-Plugin für FF14 das blinden Spielern via NVDA/TOLK ermöglicht das Spie
   Lokal ok (User), **erstmal nicht ins Release** — weiter testen, erst
   nach ausdrücklicher Freigabe committen/pushen.
 
-## STAND JETZT (2026-10-17): RELEASE v6.08.128
+## STAND JETZT (2026-10-17): RELEASE v6.08.129
+
+>>> VERSION: gesprochen / Tag 6.08.129; repo.json 6.08.129.0.
+    Manifest im ZIP zeigt 6.8.129.0. Installer unverändert 1.2.2.0.
+
+>>> INHALT seit 6.08.128: Beschwörer sagt eine geladene Primae nur, wenn
+    SummonTimer und AttunementCount beide 0 sind. „alle drei bereit“ entfällt.
+    Ätherfluss, Karfunkel-Namen und drei Sen bleiben.
+
+>>> NIE IM RELEASE: BossMod, AutoDuty-Plugin, AccessibleVendorSell,
+    Craft-Kategorie, Mahjong-WIP, BossMod Minus/Alt+Minus,
+    Arsenal→Inventar (Strg+Alt+F7).
+
+>>> UPDATE: Optionsmenü → Aktualisierung → Nach Aktualisierung suchen.
+
+>>> PRÜFUNG: Build-Local Release, 0 Warnungen, 0 Fehler. DLL nicht ins Spiel
+    kopiert. SHA-256 801A629A387B10232ED5B0D437ECF2175E8C650081CC4C4B1718139B459E7763.
+    Test-Local: 1131 Prüfungen in 7 Projekten, keine übersprungen.
+    latest.zip 138 Dateien, kein Quelltext, SHA-256
+    025A062BD2736EFDBA4ABFC99E7E5E6BF92D6AA3B62C2877577B6D370F8BD90E.
+    Diese Ausgabe nicht in FFXIV geprüft.
+
+## STAND DAVOR (2026-10-17): RELEASE v6.08.128
 
 >>> VERSION: gesprochen / Tag 6.08.128; Assembly/repo.json/Manifest 6.08.128.0
     (.NET zeigt 6.8.128.0). Installer unverändert 1.2.2.0.
