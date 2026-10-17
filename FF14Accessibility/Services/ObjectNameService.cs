@@ -41,6 +41,7 @@ namespace FF14Accessibility.Services;
 public sealed class ObjectNameService
 {
     private readonly IDataManager _data;
+    private readonly QuestObjectCatalog? _questObjects;
 
     // BaseId + kind -> sheet name ("" = sheet is silent too). Sheets are static
     // per game version, so misses are worth caching: a crowded zone asks the
@@ -62,7 +63,11 @@ public sealed class ObjectNameService
         _purposes.Clear();
     }
 
-    public ObjectNameService(IDataManager data) => _data = data;
+    public ObjectNameService(IDataManager data, QuestObjectCatalog? questObjects = null)
+    {
+        _data = data;
+        _questObjects = questObjects;
+    }
 
     /// <summary>
     /// True when a string carries something a screen reader can actually read
@@ -208,33 +213,56 @@ public sealed class ObjectNameService
         // CustomTalk, Warp - see Lumina's EObj). Ask what it actually is; do not
         // assume from the object's name.
         var link = eobj.Data;
-        if (link.RowId == 0) return ObjectPurpose.None;
 
-        if (link.Is<Quest>() && link.GetValueOrDefault<Quest>() is { } quest)
+        if (link.RowId != 0 && link.Is<Quest>() && link.GetValueOrDefault<Quest>() is { } quest)
         {
-            // Das Blatt liefert den Namen ENGLISCH - diese Installation rendert
-            // russisch nur in der Anzeige (6.08.53). Die Zeilen-Id kennt keine
-            // Sprache: ueber sie kommt der russische Kurzname aus derselben
-            // Uebersetzungsdatei, aus der auch die Anzeige im Spiel kommt.
-            // Ohne Uebersetzung bleibt es beim Blattnamen, nie bei Schweigen
-            // (Meldung 2026-09-16: "Цель для To Catch a Poacher" statt
-            // "Поймать браконьера").
-            var name = StripDeclensionMarkers(
-                GameDisplayText.Name<Quest>(quest.RowId, x => x.Name) is { } displayed ? displayed :
-                Loc.IsRussian && RussianQuestNames.QuestName(quest.RowId) is { } russian
-                    ? russian
-                    : quest.Name.ExtractText());
-            if (IsSpeakable(name)) return new ObjectPurpose(quest.RowId, name, string.Empty);
+            var named = PurposeForQuest(quest);
+            if (named.QuestRowId != 0) return named;
         }
 
-        if (link.Is<Warp>() && link.GetValueOrDefault<Warp>() is { } warp)
+        if (link.RowId != 0 && link.Is<Warp>() && link.GetValueOrDefault<Warp>() is { } warp)
         {
             var area = warp.TerritoryType.ValueNullable?.PlaceName.ValueNullable?.Name.ExtractText() ?? string.Empty;
             area = StripDeclensionMarkers(area);
             if (IsSpeakable(area)) return new ObjectPurpose(0, string.Empty, area);
         }
 
+        // The duty copies of a quest prop often have an empty EObj.Data.
+        // The quest battle still names their Level row. Speak that quest,
+        // the same way a Data link is spoken, and only when one quest claims
+        // the row. Measured 2026-10-15: footprints 2005711-2005713.
+        var battleQuest = _questObjects?.BattleQuestId(baseId) ?? 0;
+        if (battleQuest != 0 && _data.GetExcelSheet<Quest>().TryGetRow(battleQuest, out var battleRow))
+        {
+            var named = PurposeForQuest(battleRow);
+            if (named.QuestRowId != 0) return named;
+        }
+
         return ObjectPurpose.None;
+    }
+
+    /// <summary>
+    /// Spoken quest binding. The sheet name is English. The client display
+    /// wins, then the Russian table, then the sheet. An unspeakable name is
+    /// not a binding.
+    /// </summary>
+    private ObjectPurpose PurposeForQuest(Quest quest)
+    {
+        // Das Blatt liefert den Namen ENGLISCH - diese Installation rendert
+        // russisch nur in der Anzeige (6.08.53). Die Zeilen-Id kennt keine
+        // Sprache: ueber sie kommt der russische Kurzname aus derselben
+        // Uebersetzungsdatei, aus der auch die Anzeige im Spiel kommt.
+        // Ohne Uebersetzung bleibt es beim Blattnamen, nie bei Schweigen
+        // (Meldung 2026-09-16: "Цель для To Catch a Poacher" statt
+        // "Поймать браконьера").
+        var name = StripDeclensionMarkers(
+            GameDisplayText.Name<Quest>(quest.RowId, x => x.Name) is { } displayed ? displayed :
+            Loc.IsRussian && RussianQuestNames.QuestName(quest.RowId) is { } russian
+                ? russian
+                : quest.Name.ExtractText());
+        return IsSpeakable(name)
+            ? new ObjectPurpose(quest.RowId, name, string.Empty)
+            : ObjectPurpose.None;
     }
 
     /// <summary>

@@ -8,6 +8,7 @@ using Dalamud.Game.ClientState.Objects.Enums;
 using Dalamud.Game.ClientState.Objects.Types;
 using Dalamud.Plugin.Services;
 using FFXIVClientStructs.FFXIV.Client.Game.Control;
+using FFXIVClientStructs.FFXIV.Client.UI;
 using FFXIVClientStructs.FFXIV.Client.UI.Agent;
 using LuminaENpcResident = Lumina.Excel.Sheets.ENpcResident;
 using LuminaGatheringPoint = Lumina.Excel.Sheets.GatheringPoint;
@@ -86,6 +87,10 @@ internal enum NavCategory
     // DungeonRouteService.
     DungeonRoute,
     Aetherytes,
+    // Windäther: fehlende Quellen bekannter Gebiete, plus Feldquellen im
+    // Gebiet, in dem der Spieler steht. Verdeckte Namen bleiben stumm.
+    // Siehe AetherWalkList.
+    AetherCurrents,
     QuestGoals,
     AcceptableQuests,
     Levequests,
@@ -715,6 +720,9 @@ public sealed class NavigationService
         // ObjectTable: die Marker kennen ALLE Ätheryten + Aethernet-Splitter
         // der Zone, die Objektsuche nur die in ~100 m (User-Wunsch 2026-07-13).
         (NavCategory.Aetherytes,      null),
+        // Windäther: gleiche Bauart wie die Ätheryten daneben, nur dass die
+        // Punkte fehlende Strömungen sind und auch in einer anderen Zone liegen.
+        (NavCategory.AetherCurrents,  null),
         (NavCategory.QuestGoals,      null),
         (NavCategory.AcceptableQuests,null),
         // Freibriefe: giver NPCs (Levemete) + objectives of accepted leves, both
@@ -883,6 +891,14 @@ public sealed class NavigationService
     /// </summary>
     public PartyMonitorService? PartyMonitor { get; set; }
 
+    /// <summary>
+    /// Fehlende Windätherquellen. Plugin.cs setzt das, nachdem der Fensterleser
+    /// steht: die Navigation wird früher gebaut. Das Argument ist die
+    /// Territorien-Id, mit der Num3 den Zonenwechsel prüft. Null heißt, die
+    /// Liste ist nicht angebunden.
+    /// </summary>
+    internal Func<uint, AetherWalkReport>? AetherWalks { get; set; }
+
     /// <summary>[Tiefes Gewoelbe] Ob der Gewoelbe-Satz im vorigen Frame galt, damit das Betreten oder
     /// Verlassen eines Gewoelbes den Browser zuruecksetzen kann.</summary>
     private bool _deepCategoriesActive;
@@ -911,6 +927,7 @@ public sealed class NavigationService
     private bool IsLevequestCategory       => Categories[_categoryIndex].Cat == NavCategory.Levequests;
     private bool IsPlacesCategory          => Categories[_categoryIndex].Cat == NavCategory.Waypoints;
     private bool IsAetheryteCategory       => Categories[_categoryIndex].Cat == NavCategory.Aetherytes;
+    private bool IsAetherCategory          => Categories[_categoryIndex].Cat == NavCategory.AetherCurrents;
     private bool IsFishingCategory         => Categories[_categoryIndex].Cat == NavCategory.FishingSpots;
     private bool IsFateCategory            => Categories[_categoryIndex].Cat == NavCategory.Fates;
     private bool IsEventAreaCategory       => Categories[_categoryIndex].Cat == NavCategory.EventAreas;
@@ -1408,6 +1425,12 @@ public sealed class NavigationService
             return;
         }
 
+        if (IsAetherCategory)
+        {
+            SpeakAetherCategory();
+            return;
+        }
+
         if (IsFishingCategory)
         {
             var spots = _fishing.GetSpotsInCurrentZone().Count;
@@ -1572,6 +1595,12 @@ public sealed class NavigationService
         if (IsPlacesCategory || IsAetheryteCategory)
         {
             CyclePlaceDestination(direction, player, aetherytesOnly: IsAetheryteCategory);
+            return;
+        }
+
+        if (IsAetherCategory)
+        {
+            CycleAetherDestination(direction, player);
             return;
         }
 
@@ -1798,10 +1827,11 @@ public sealed class NavigationService
 
     /// <summary>
     /// Cycles Quest objects as a merged list: live EventObjs/Treasures the
-    /// markers or nameplates flag, PLUS Level Type-49 EventRange walk-in
-    /// volumes for accepted quests in this zone. Ranges are not in the
-    /// ObjectTable — they become <see cref="SelectedQuestDestination"/> so
-    /// Numpad 3 walks into the small circle (same path as Quest goals).
+    /// markers, nameplates or sheets flag, plus Type-49 volumes that sit
+    /// near a map pin. A quest-battle walk-in with no pin is a quest goal,
+    /// not an entry here. Ranges are not in the ObjectTable — they become
+    /// <see cref="SelectedQuestDestination"/> so Numpad 3 walks into the
+    /// small circle (same path as Quest goals).
     /// </summary>
     private void CycleQuestObjectOrTrigger(int direction, IGameObject player)
     {
@@ -1920,10 +1950,16 @@ public sealed class NavigationService
             ? $", {obj}"
             : string.Empty;
 
+        // A battle walk-in is a goal, not a map pin. The same prefix the
+        // quest-object list used for a trigger tells them which it is.
+        var role = dest.Role == QuestMarkerRole.QuestTrigger
+            ? AccessibilityStrings.LeveRolePrefix(dest.Role)
+            : string.Empty;
+
         string text;
         if (dest.InCurrentZone)
         {
-            text = $"{level}{story}{dest.QuestName}{unlock}{todo}, " +
+            text = $"{role}{level}{story}{dest.QuestName}{unlock}{todo}, " +
                    $"{FormatDistance(Vector3.Distance(player.Position, dest.Position))}, " +
                    $"{CalculateDirection(player, dest.Position)}" +
                    $"{GoalCircleHint(dest, player)}.{detail}";
@@ -1934,7 +1970,7 @@ public sealed class NavigationService
             // and the transition that leads there (BFS over the map graph).
             var zone = _places.GetMapName(dest.MapId);
             var hop  = _places.FindFirstHopToMap(dest.MapId, out var hops);
-            text = $"{level}{story}{dest.QuestName}{unlock}{todo}, " +
+            text = $"{role}{level}{story}{dest.QuestName}{unlock}{todo}, " +
                    (string.IsNullOrEmpty(zone) ? AccessibilityStrings.InAnotherArea : AccessibilityStrings.InArea(zone));
             if (hop != null)
             {
@@ -2502,6 +2538,94 @@ public sealed class NavigationService
         _log.Info($"[Orte] Auswahl: {text} pos=({place.Position.X:F1}|{place.Position.Z:F1})");
         _tolk.SpeakInterrupt(text);
     }
+
+    // Windäther: fehlende Quellen. Dieselbe Zone zuerst. Feldquellen dort
+    // stehen nach Entfernung, die nächste vorn. Num3 benutzt SelectedQuestDestination.
+    private void SpeakAetherCategory()
+    {
+        var report = ReadAetherWalks();
+        if (report == null || !report.Readable)
+        {
+            _tolk.SpeakInterrupt($"{CurrentCategoryLabel}. {AccessibilityStrings.AetherProgressUnread}");
+            return;
+        }
+
+        var here = 0;
+        var away = 0;
+        var territory = _clientState.TerritoryType;
+        foreach (var target in report.Targets)
+        {
+            if (target.TerritoryId == territory) here++;
+            else away++;
+        }
+
+        _tolk.SpeakInterrupt(here == 0 && away == 0
+            ? AccessibilityStrings.NoAetherWalks
+            : AccessibilityStrings.CategoryAetherCount(here, away));
+    }
+
+    private void CycleAetherDestination(int direction, IGameObject player)
+    {
+        SelectedPlaceDestination = null;
+        var report = ReadAetherWalks();
+        if (report == null || !report.Readable)
+        {
+            SelectedQuestDestination = null;
+            _tolk.SpeakInterrupt($"{CurrentCategoryLabel}. {AccessibilityStrings.AetherProgressUnread}");
+            return;
+        }
+
+        var targets = report.Targets;
+        if (targets.Count == 0)
+        {
+            SelectedQuestDestination = null;
+            _tolk.SpeakInterrupt(AccessibilityStrings.NoAetherWalks);
+            return;
+        }
+
+        _cycleIndex = BrowserTargetSelection.NextIndex(_cycleIndex, direction, targets.Count);
+        var target = targets[_cycleIndex];
+        var inZone = target.TerritoryId == _clientState.TerritoryType;
+        SelectedQuestDestination = new QuestDestination(
+            QuestName: target.Name,
+            Detail: target.ZoneName,
+            Position: target.Position,
+            Radius: 0f,
+            TerritoryTypeId: target.TerritoryId,
+            MapId: target.MapId,
+            InCurrentZone: inZone,
+            Kind: QuestKind.Unknown,
+            Level: 0);
+
+        string text;
+        if (inZone)
+        {
+            text = $"{target.Name}, " +
+                   $"{FormatDistance(Distance2D(player.Position, target.Position))}, " +
+                   $"{CalculateDirection(player, target.Position)}.";
+        }
+        else
+        {
+            text = $"{target.Name}, {AccessibilityStrings.InArea(target.ZoneName)}";
+            var hop = _places.FindFirstHopToMap(target.MapId, out var hops);
+            if (hop != null)
+            {
+                text += AccessibilityStrings.RouteViaHop(
+                    hop.Name,
+                    FormatDistance(Distance2D(player.Position, hop.Position)),
+                    CalculateDirection(player, hop.Position),
+                    hops - 1);
+                text += AccessibilityStrings.NumpadWalksToTransition;
+            }
+        }
+
+        text += $" {AccessibilityStrings.Counter(_cycleIndex + 1, targets.Count)}.";
+        _log.Info($"[Aether] Lauf {_cycleIndex + 1}/{targets.Count} Territorium={target.TerritoryId} Karte={target.MapId} hier={inZone}");
+        _tolk.SpeakInterrupt(text);
+    }
+
+    private AetherWalkReport? ReadAetherWalks()
+        => AetherWalks?.Invoke(_clientState.TerritoryType);
 
     // ── Angelplätze: durch die Angel-Löcher des Gebiets blättern ──
     //
@@ -3547,9 +3671,65 @@ public sealed class NavigationService
         if (Categories[index].Cat == NavCategory.GatheringNodes)
             return IsGatheringSpotClass() && _gathering.GetSpotsAcrossZones().Count > 0;
 
+        // Windäther nur, wenn das Spiel das Menü Windätherquellen freigegeben hat.
+        // Die leere Liste bleibt danach stehen. Gesperrt wird sie nur übersprungen.
+        if (Categories[index].Cat == NavCategory.AetherCurrents)
+            return IsAetherMenuUnlocked();
+
         var kinds = Categories[index].Kinds;
         if (kinds == null || !kinds.Contains(ObjectKind.GatheringPoint)) return true;
         return IsGatheringClass() || GetObjectsOfKinds(kinds).Count > 0;
+    }
+
+    // MainCommand row 67 on the installed sheets, 2026-10-17: German
+    // "Windätherquellen", English "Aether Currents", category 4 (Travel).
+    private const uint AetherCurrentMainCommand = 67;
+
+    // Last answer from IsMainCommandUnlocked, so the log writes one line per change.
+    private bool? _aetherMenuUnlocked;
+    private bool _aetherMenuFailed;
+
+    /// <summary>
+    /// True only after the game has unlocked the Aether Currents main-menu command.
+    /// A missing module or a failed call hides the category. The answer is logged
+    /// when it changes. A failed call is logged once.
+    /// </summary>
+    private unsafe bool IsAetherMenuUnlocked()
+    {
+        if (_aetherMenuFailed) return false;
+        try
+        {
+            var ui = UIModule.Instance();
+            if (ui == null)
+            {
+                NoteAetherMenu(null);
+                return false;
+            }
+
+            var unlocked = ui->IsMainCommandUnlocked(AetherCurrentMainCommand);
+            NoteAetherMenu(unlocked);
+            return unlocked;
+        }
+        catch (Exception ex)
+        {
+            _aetherMenuFailed = true;
+            _log.Warning(ex, "[Aether] IsMainCommandUnlocked fehlgeschlagen. Kategorie bleibt verborgen.");
+            return false;
+        }
+    }
+
+    private void NoteAetherMenu(bool? unlocked)
+    {
+        if (_aetherMenuUnlocked == unlocked) return;
+        _aetherMenuUnlocked = unlocked;
+        if (unlocked == null)
+        {
+            _log.Info($"[Aether] Hauptkommando {AetherCurrentMainCommand} nicht lesbar. Kategorie verborgen.");
+            return;
+        }
+
+        _log.Info($"[Aether] Hauptkommando {AetherCurrentMainCommand} freigeschaltet={(unlocked.Value ? "ja" : "nein")} " +
+                  $"-> Kategorie {(unlocked.Value ? "sichtbar" : "verborgen")}.");
     }
 
     // Last class the check logged, so the probe writes one line per change.
@@ -4269,17 +4449,28 @@ public sealed class NavigationService
 
         if (!IsQuestOnlyCategory) return objects;
 
-        // Quest-only category: two independent links, both owned by the game.
+        // Quest-only category: three independent links, all owned by the game.
         //  (1) MARKER: what the quest markers point at, resolved over the Level
         //      sheet to the object's data-sheet id (see GetQuestObjectIds).
         //      Covers active objectives, including enemies without a nameplate.
         //  (2) NAMEPLATE: the icon the game draws above the object's head - the
         //      very "!" a sighted player sees. Covers acceptable quests whose
         //      giver has no marker of its own in this zone.
-        // Neither is a heuristic; an object counts when at least one says yes.
+        //  (3) SHEET: EObj.Data / an EOBJECT script argument, or a type-45 Level
+        //      row named by the accepted quest's QuestBattle in this territory.
+        //      A search pin of type 51 has Object 0, so (1) misses the prop even
+        //      when the sheet already names the quest (log 2026-10-15).
+        //      This adds to the quest list. It does not remove the prop from
+        //      Objekte. Quest state is still not a reason to hide something.
+        // An object counts when at least one says yes. The sheet link is only
+        // applied to event objects: a battle enemy is not a quest object.
         var questIds = _questMarkers.GetQuestObjectIds();
+        var sheetIds = kinds.Contains(ObjectKind.EventObj)
+            ? _questMarkers.GetLinkedObjectIds()
+            : new HashSet<uint>();
         var byMarker = 0;
         var byIcon   = 0;
+        var bySheet  = 0;
         var iconTrace = new List<string>();
 
         var filtered = new List<IGameObject>();
@@ -4288,17 +4479,20 @@ public sealed class NavigationService
             var fromMarker = questIds.Contains(o.BaseId);
             var icon       = NamePlateIcon(o);
             var fromIcon   = !string.IsNullOrEmpty(AccessibilityStrings.QuestMarkerHint(icon));
+            var fromSheet  = o.ObjectKind == ObjectKind.EventObj && sheetIds.Contains(o.BaseId);
 
             if (icon != 0) iconTrace.Add($"{o.Name.TextValue}={icon}");
             if (fromMarker) byMarker++;
             if (fromIcon) byIcon++;
-            if (fromMarker || fromIcon) filtered.Add(o);
+            if (fromSheet) bySheet++;
+            if (fromMarker || fromIcon || fromSheet) filtered.Add(o);
         }
 
         // The icon list is what refines QuestMarkerHint's ranges from real data -
         // only non-zero icons, so this stays short.
         _log.Info($"[Nav] {CurrentCategoryLabel}: {filtered.Count} von {objects.Count} Objekten " +
-                  $"(per Marker {byMarker}, per Symbol {byIcon}; {questIds.Count} Ids aus Markern). " +
+                  $"(per Marker {byMarker}, per Symbol {byIcon}, per Blatt {bySheet}; " +
+                  $"{questIds.Count} Ids aus Markern, {sheetIds.Count} aus dem Blatt). " +
                   $"Symbole: {(iconTrace.Count > 0 ? string.Join(", ", iconTrace) : "keine")}");
         return filtered;
     }

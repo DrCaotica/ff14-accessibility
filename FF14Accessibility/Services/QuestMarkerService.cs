@@ -2,6 +2,7 @@
 using System.Linq;
 using System.Numerics;
 using Dalamud.Plugin.Services;
+using FFXIVClientStructs.FFXIV.Client.Game;
 using FFXIVClientStructs.FFXIV.Client.Game.UI;
 using FFXIVClientStructs.FFXIV.Client.UI;
 using FFXIVClientStructs.FFXIV.Component.GUI;
@@ -141,16 +142,20 @@ public sealed class QuestMarkerService
     private readonly IDataManager _data;
     private readonly IPluginLog _log;
     private readonly string? _harmoniaPacks;
+    private readonly QuestObjectCatalog _questObjects;
     private bool _questNameRussian;
     private Dalamud.Game.ClientLanguage _questNameLanguage;
     private int _questNameDisplay;
 
-    public QuestMarkerService(IClientState clientState, IDataManager data, IPluginLog log, string? harmoniaPacks = null)
+    public QuestMarkerService(
+        IClientState clientState, IDataManager data, IPluginLog log,
+        string? harmoniaPacks = null, QuestObjectCatalog? questObjects = null)
     {
         _clientState = clientState;
         _data = data;
         _log = log;
         _harmoniaPacks = harmoniaPacks;
+        _questObjects = questObjects ?? new QuestObjectCatalog(data, log);
     }
 
     private Dictionary<uint, List<EventRangeRow>>? _eventRangesByQuestId;
@@ -254,25 +259,39 @@ public sealed class QuestMarkerService
     }
 
     /// <summary>
-    /// Walk-in EventRange volumes for ACCEPTED quests in the current territory.
+    /// Walk-in EventRange volumes for ACCEPTED quests in the current territory
+    /// that sit near a map pin. Listed under Quest objects. They are not
+    /// ObjectTable entries.
     ///
     /// Map markers (Type 51) only give a search circle; spawn/progress often
     /// needs entering a Type-49 volume linked by <c>Level.EventId</c> = Quest
     /// RowId (sheet + zone-probe 2026-09-10). Ranges are kept when they sit
     /// near an in-zone marker of that quest (marker Radius + slack), so later
-    /// steps of the same quest do not flood the list. Listed under the Quest
-    /// objects browser â€” these are not ObjectTable entries.
+    /// steps of the same quest do not flood the list.
+    /// A QuestBattle walk-in has no pin and no <c>Level.EventId</c>. That one
+    /// is a quest goal, see <see cref="GetDestinations"/>.
     /// </summary>
     public unsafe List<QuestDestination> GetEventRangeDestinations()
     {
         var result = new List<QuestDestination>();
-        var map = Map.Instance();
-        if (map == null) return result;
-
-        var currentTerritory = _clientState.TerritoryType;
-        var rangesByQuest = EventRangesByQuestId();
+        var currentTerritory = (ushort)_clientState.TerritoryType;
         var seenLevel = new HashSet<uint>();
         var trace = new List<string>();
+        var map = Map.Instance();
+        if (map != null)
+            AppendMarkerTriggers(result, map, currentTerritory, seenLevel, trace);
+
+        _log.Info($"[Quest] EventRange-Auslöser in Zone ({result.Count}): " +
+                  (trace.Count > 0 ? string.Join(" | ", trace) : "keine"));
+        return result;
+    }
+
+    /// <summary>Type-49 volumes that sit inside an accepted quest's map circle.</summary>
+    private unsafe void AppendMarkerTriggers(
+        List<QuestDestination> result, Map* map, ushort currentTerritory,
+        HashSet<uint> seenLevel, List<string> trace)
+    {
+        var rangesByQuest = EventRangesByQuestId();
 
         foreach (ref var marker in map->QuestMarkers)
         {
@@ -342,10 +361,65 @@ public sealed class QuestMarkerService
             }
         }
 
-        _log.Info($"[Quest] EventRange-AuslÃ¶ser in Zone ({result.Count}): " +
-                  (trace.Count > 0 ? string.Join(" | ", trace) : "keine"));
-        return result;
     }
+
+    /// <summary>
+    /// Type-49 volumes named by an accepted quest's QuestBattle, in this
+    /// territory. They have no map pin and no Level.EventId, so the circle
+    /// test above never sees them. They are quest goals: the place to walk
+    /// when the live enemy leaves range. Measured 2026-10-15 on the snow
+    /// duty. The hiding-place range is one QuestBattle script value, about
+    /// 7 m across. Type 9 enemies are not included.
+    /// </summary>
+    private void AppendBattleTriggers(
+        List<QuestDestination> result, ushort currentTerritory,
+        HashSet<uint> seenLevel, List<string> trace)
+    {
+        var accepted = AcceptedQuestIds();
+        if (accepted.Count == 0) return;
+
+        foreach (var trigger in _questObjects.Triggers)
+        {
+            if (trigger.Territory != currentTerritory) continue;
+            if (!accepted.Contains(trigger.QuestId)) continue;
+            if (!seenLevel.Add(trigger.LevelId)) continue;
+            if (!_data.GetExcelSheet<LuminaQuest>().TryGetRow(trigger.QuestId, out var quest)) continue;
+
+            var name = QuestDisplayName(quest);
+            if (string.IsNullOrWhiteSpace(name)) continue;
+
+            var section = quest.JournalGenre.ValueNullable?.JournalCategory.ValueNullable?.JournalSection.RowId ?? uint.MaxValue;
+            var kind = KindForSection(section);
+            var level = quest.ClassJobLevel.Count > 0 ? (int)quest.ClassJobLevel[0] : 0;
+
+            result.Add(new QuestDestination(
+                name,
+                string.Empty,
+                new Vector3(trigger.X, trigger.Y, trigger.Z),
+                trigger.Radius,
+                trigger.Territory,
+                trigger.MapId,
+                InCurrentZone: true,
+                kind,
+                level,
+                QuestMarkerRole.QuestTrigger));
+
+            trace.Add($"Kampf '{name}' QuestId={trigger.QuestId} LevelId={trigger.LevelId} " +
+                      $"pos=({trigger.X:F0}|{trigger.Z:F0}) r={trigger.Radius:F1}");
+        }
+    }
+
+    /// <summary>Spoken quest name. The sheet name is English; the client display wins.</summary>
+    private static string QuestDisplayName(LuminaQuest quest)
+    {
+        var displayed = GameDisplayText.Name<LuminaQuest>(quest.RowId, static x => x.Name);
+        if (!string.IsNullOrWhiteSpace(displayed)) return displayed.Trim();
+        if (Loc.IsRussian && RussianQuestNames.QuestName(quest.RowId) is { } russian
+            && !string.IsNullOrWhiteSpace(russian))
+            return russian.Trim();
+        return quest.Name.ExtractText().Trim();
+    }
+
 
     /// <summary>
     /// All objective locations of ACCEPTED quests (a quest can have several).
@@ -355,18 +429,62 @@ public sealed class QuestMarkerService
     public unsafe List<QuestDestination> GetDestinations()
     {
         var result = new List<QuestDestination>();
+        var currentTerritory = _clientState.TerritoryType;
         var map = Map.Instance();
         if (map == null)
-        {
             _log.Warning("[Quest] Map.Instance() ist null - keine Quest-Marker lesbar.");
-            return result;
+        else
+        {
+            // QuestMarkers is a fixed 30-slot span; empty slots have a blank label.
+            foreach (ref var marker in map->QuestMarkers)
+                AddMarkerDestinations(result, marker, currentTerritory, "Quest");
         }
 
-        var currentTerritory = _clientState.TerritoryType;
-        // QuestMarkers is a fixed 30-slot span; empty slots have a blank label.
-        foreach (ref var marker in map->QuestMarkers)
-            AddMarkerDestinations(result, marker, currentTerritory, "Quest");
+        // A quest battle can name a walk-in with no map pin. That place stays
+        // a goal, so Numpad 3 can reach it after the enemy runs off. It is not
+        // a quest object and it is not spoken as a map pin.
+        if (currentTerritory <= ushort.MaxValue)
+        {
+            var trace = new List<string>();
+            AppendBattleTriggers(result, (ushort)currentTerritory, new HashSet<uint>(), trace);
+            if (trace.Count > 0)
+                _log.Info("[Quest] Kampf-Ziel ohne Kartenpunkt (" + trace.Count + "): " +
+                          string.Join(" | ", trace));
+        }
 
+        return result;
+    }
+
+    /// <summary>
+    /// Accepted-quest pins in the current territory. Quiet on purpose: the
+    /// duty watcher calls this twice a second, and <see cref="GetDestinations"/>
+    /// logs every marker. <c>ShouldRender</c> is not a filter. Its runtime
+    /// meaning is not measured, and quest goals already walk these positions
+    /// without it. Empty when the map is unavailable.
+    /// </summary>
+    public unsafe List<DutyPinPoint> GetInZonePins()
+    {
+        var result = new List<DutyPinPoint>();
+        var map = Map.Instance();
+        if (map == null) return result;
+
+        var currentTerritory = _clientState.TerritoryType;
+        foreach (ref var marker in map->QuestMarkers)
+        {
+            var label = marker.Label.ToString();
+            if (string.IsNullOrWhiteSpace(label)) continue;
+
+            var locations = marker.MarkerData.Count;
+            if (locations is < 0 or > 100) continue;
+
+            for (var i = 0; i < locations; i++)
+            {
+                var data = marker.MarkerData[i];
+                if (data.TerritoryTypeId != currentTerritory) continue;
+                result.Add(new DutyPinPoint(
+                    label, data.Position.X, data.Position.Y, data.Position.Z, data.Radius));
+            }
+        }
         return result;
     }
 
@@ -535,6 +653,35 @@ public sealed class QuestMarkerService
         _log.Info($"[Quest] Objekt-Ids aus Markern ({ids.Count}): " +
                   (trace.Count > 0 ? string.Join(" | ", trace) : "keine Marker-Orte"));
         return ids;
+    }
+
+    /// <summary>
+    /// Data ids of event objects the sheets tie to an accepted quest.
+    /// Two links, both read from the sheets and neither from a nameplate:
+    /// <c>EObj.Data</c> / an <c>EOBJECT</c> script argument, and a type-45
+    /// Level row named by the quest's <c>QuestBattle</c> in this territory.
+    /// Battle props stay in their own territory so a shared id elsewhere
+    /// is left alone. This does not remove anything from the plain object list.
+    /// </summary>
+    public HashSet<uint> GetLinkedObjectIds()
+    {
+        var accepted = AcceptedQuestIds();
+        var ids = QuestObjectLinks.BaseIds(_questObjects.Links, accepted, (ushort)_clientState.TerritoryType);
+        _log.Info($"[Quest] Blatt-Objekt-Ids ({ids.Count}) in Zone {_clientState.TerritoryType}, " +
+                  $"angenommene Quests mit Verknüpfung {accepted.Count}.");
+        return ids;
+    }
+
+    /// <summary>Quest rows from the catalog that <c>QuestManager</c> currently holds.</summary>
+    private unsafe HashSet<uint> AcceptedQuestIds()
+    {
+        var accepted = new HashSet<uint>();
+        var manager = QuestManager.Instance();
+        if (manager == null) return accepted;
+
+        foreach (var questId in _questObjects.QuestIds())
+            if (manager->IsQuestAccepted(questId)) accepted.Add(questId);
+        return accepted;
     }
 
     /// <summary>

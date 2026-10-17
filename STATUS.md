@@ -27,7 +27,181 @@ Dalamud-Plugin für FF14 das blinden Spielern via NVDA/TOLK ermöglicht das Spie
   Lokal ok (User), **erstmal nicht ins Release** — weiter testen, erst
   nach ausdrücklicher Freigabe committen/pushen.
 
-## STAND JETZT (2026-09-28): RELEASE v6.08.35
+## STAND JETZT (2026-10-17): RELEASE v6.08.128
+
+>>> VERSION: gesprochen / Tag 6.08.128; Assembly/repo.json/Manifest 6.08.128.0
+    (.NET zeigt 6.8.128.0). Installer unverändert 1.2.2.0.
+
+>>> INHALT seit öffentlichem 6.08.35: lokale Fassung inklusive der eingearbeiteten
+    Beiträge, russische Ansage bei russischer Sprache, Inventar nach Kategorien
+    und Spielmenü des Gegenstands, Arsenal nach Klassen, Handel, Jagd mit
+    Standort und Stockwerk, Windäther, Bodenziel, Quest-Objekte und Verfolgungsziel,
+    Stolperville als Ton ohne eigenen Lauf, stummes Wegenetz ohne Spielfigur.
+
+>>> NIE IM RELEASE: BossMod, AutoDuty-Plugin, AccessibleVendorSell,
+    Craft-Kategorie, Mahjong-WIP, BossMod Minus/Alt+Minus,
+    Arsenal→Inventar (Strg+Alt+F7).
+
+>>> UPDATE: Optionsmenü → Aktualisierung → Nach Aktualisierung suchen.
+
+>>> PRÜFUNG: Build-Local Release, 0 Warnungen, 0 Fehler. DLL nicht ins Spiel
+    kopiert. SHA-256 4C36E9BB026FD33D6D27C05D3B6B7A3074D91B63362B64EDF528E6D91715CA8F.
+    Test-Local: 1129 Prüfungen in 7 Projekten, keine übersprungen.
+    latest.zip 138 Dateien, kein Quelltext, SHA-256
+    4B10DE3A5686612F638085D68F8BECC63E42EB77552E1653117B2A2EEA894203.
+    Diese Ausgabe nicht in FFXIV geprüft.
+
+## STAND DAVOR (2026-10-06): INVENTAR-MENÜ OHNE OFFENE TASCHE
+
+>>> GEMELDET: Verkauf am Händler funktioniert. Nur Strg+F3 und dann 0
+    auf einem Gegenstand öffnet das Kontextmenü nicht.
+
+>>> LOG 6.08.110: Ohne Fenster „Context opened“ mit owner=16,
+    shop=False, bagVisible=False, danach kein Fokus auf ContextMenu.
+    Mit offenem Shop dasselbe Fach: owner=122, bagVisible=True, Fokus
+    ContextMenu, Text „Verkaufen“.
+
+>>> GEBAUT (lokal 6.08.111): Ist kein Shop und keine Tasche sichtbar,
+    fordert 0 einmal den Hauptbefehl 10 an. Das ist im Blatt MainCommand
+    dieser Installation „Inventar“, dieselbe Aktion wie die Taste I.
+    Das Menü zählt erst, wenn das Spiel ContextMenu zeigt. Der Händler
+    bleibt der Besitzer, solange sein Fenster offen ist. Es wird keine
+    Zeile verkauft und keine Menge gesetzt.
+
+>>> Im Spiel für 6.08.111 noch nicht geprüft. Debug-DLL nach devPlugins.
+    Kein Commit, kein Push, kein ZIP.
+
+## STAND DAVOR (2026-10-06): INVENTAR-KONTEXTMENÜ
+
+>>> WUNSCH: In der gesprochenen Inventarliste soll Numpad 0 das echte
+    Kontextmenü des Gegenstands öffnen. Beim Händler, nach Strg+F3,
+    soll dieselbe Taste die Aktionen anbieten, mit denen man verkauft.
+
+>>> GEBAUT (lokal 6.08.110): Die Kategorien bleiben. Gil wird weiter nur
+    vorgelesen. Auf einem Gegenstand öffnet 0 das Spielmenü genau dieses
+    Fachs. Das Plugin wählt keine Zeile und bestätigt keinen Verkauf.
+    Ist das Gil-Shop-Fenster offen, gehört das Menü dem Shop, damit das
+    Spiel Verkaufen anbieten kann. Sonst gehört es dem Inventarfenster.
+    Die gedrückte 0 wird festgehalten, bis man sie loslässt, damit nicht
+    sofort der erste Befehl ausgelöst wird. 4 geht zurück, Entf schließt.
+
+>>> NICHT in FFXIV geprüft. Debug-DLL geht nach devPlugins. Kein Commit,
+    kein Push, kein ZIP.
+
+## STAND JETZT (2026-10-06): ARSENAL NACH KLASSEN
+
+>>> WUNSCH: Die Arsenaltruhe soll die Ausrüstung nach Klassen ordnen, so
+    wie das Inventar nach Kategorien: erst die Klassen, eine bestätigt,
+    dann deren Ausrüstung.
+
+>>> GEBAUT (lokal 6.08.109): Beim offenen Arsenal kommen zuerst die
+    Klassen, in denen etwas liegt. 0 öffnet die Klasse. Plus auf dem
+    Ziffernblock geht zurück. In der Klasse bleibt 0 das Spielmenü des
+    Gegenstands, 4 und 6 gehen von Gegenstand zu Gegenstand, 7 und 9
+    wechseln die Ausrüstungsart. Ein Teil für mehrere Klassen steht
+    einmal, mit diesen Namen. „Alle Klassen“ ist die eigene Zeile.
+    Die Sachen in der Truhe werden nicht verschoben.
+
+>>> TEST: 1031 Tests ohne Auslassung, Debug ohne Warnung nach devPlugins
+    kopiert (11 Dateien). Im Spiel noch nicht geprüft. ZIP nicht gebaut.
+    Öffentlich bleibt v6.08.35.
+
+## STAND DAVOR (2026-10-06): EVENTS ZEIGEN AUCH DIE FATE-ORTE
+
+>>> WUNSCH: Der Start des laufenden Events bleibt. Orte, an denen man im
+    Event FATEs machen kann, sollen in derselben Liste stehen, damit man
+    dorthin laufen kann.
+
+>>> QUELLE: Quest-Skript `FATE0`, `FATE1`, … zeigt auf die Fate-Zeile.
+    `Fate.Location` ist der EventRange in `planevent.lgb`. Genommen wird
+    die Stadt oder das Feld, nicht die Instanz-Kopie. Phase und Festival
+    kommen von der Quest, die den Slot trägt. Offline: 52 Slots, 44 Orte.
+
+>>> NICHT DRIN: Ein Event ohne benanntes FATE, zum Beispiel Yo-kai, hat
+    weiter nur den Quest-Start. Lebende FATEs der Zone bleiben in „FATEs“.
+
+>>> TEST: Automatisch 1019 Tests, Release 6.08.108 ohne Warnung.
+    Debug-DLL liegt in devPlugins. Im Spiel noch nicht geprüft.
+    ZIP nicht gebaut, Autor-Prüfung von AutoWalkService bleibt rot.
+
+## STAND DAVOR (2026-10-06): EVENTS NUR WENN SIE LAUFEN
+
+>>> WUNSCH: In der Event-Liste nur Events, die wirklich an sind. Abgelaufene
+    raus, neue von selbst rein, damit man mit Numpad 3 hinlaufen kann.
+
+>>> QUELLE: `GameMain.ActiveFestivals` (Id + Phase). Startort aus
+    `Quest.Festival` / `FestivalBegin` / `FestivalEnd` / `IssuerLocation`.
+    Pro Festival und Gebiet die früheste Quest. Sheet `Festival` hat keine
+    Namen. Alte Yo-kai-Zonenliste und Fate 1409 sind raus.
+
+>>> TEST: Spiel laden. Läuft gerade keins, fehlt die Kategorie Events.
+    Läuft eins: Strg+Bild ab bis „Events: N, … hier.“ Bild ab sagt den
+    Quest-Namen und das Gebiet. Numpad 3 läuft hin bzw. zum Übergang.
+    Nach dem Event-Ende ist der Eintrag weg, ohne Plugin-Update.
+
+## STAND DAVOR (2026-10-06): PR 31 UND PR 34 LOKAL, NICHT RELEASED
+
+>>> ZWEIG: `integrate/pr-31-34`, nur lokal. Kein Commit, kein Push.
+    Merge von PR 31 (`5d333bf`, gesprochen 6.08.106) liegt im Arbeitsbaum.
+    Öffentliches Release bleibt v6.08.35.
+
+>>> PR 31: Russisch mit Fallback, Num5 im Kontext, Craft-Action-Zuweisung,
+    Händler-Mengeneditor, Navigation, AoE-Drehung, Arsenalliste, Tests.
+    `RecipeCraftService` (`/acc craftable`) ist damit wieder im Baum.
+    Lokal erlaubt, nicht ins Release, bis es extra freigegeben wird.
+
+>>> PR 34, darauf gesetzt, ohne zweite Mengenlogik:
+    - Charakterfenster: Slotname vor dem Gegenstand, leerer Platz sagt „Leer“,
+      Zustand und Bindung von der getragenen Instanz.
+    - Taschen: Zustand und Bindung von der Instanz (Sortierkarte, sonst
+      Hover-Hook, sonst das einzige eigene Exemplar). Nicht mehr aus dem
+      Tooltip, das dem Cursor hinterherhinkt.
+    - Händlerzeile: Gegenstandsart bzw. Slot aus `ItemUICategory`.
+      Die Menge spricht der Editor aus PR 31.
+    - Arsenal-Kategorieknöpfe: die Liste aus PR 31 besitzt das Fenster.
+      Beim Wechsel mit 7/9 sagt sie „Kategorie: Name, Anzahl“.
+
+>>> LOKAL DRAUF, NICHT INS RELEASE:
+    - Freundliche Kampf-NPCs über Nameplate (`CombatSide`). Im Spiel noch
+      nicht bestätigt.
+    - Arsenal ohne Set ins Inventar: Strg+Alt+F7 und `/acc arsenal`.
+    - BossMod Minus / Alt+Minus.
+
+>>> BUILD: Debug nach `devPlugins\FF14Accessibility`, 0 Fehler.
+    Gesprochene Version dieser DLL: 6.08.106.
+    Tests ohne Spiel: Localization 16, Speech 20, Navigation 30,
+    CrossHotbar 17, RussianDescriptions 22, Regression 768 plus die
+    angepasste Nameplate-Prüfung. Ein alter Test erwartete, dass jeder
+    Kampf-NPC ohne Flags ein Gegner ist. Das war der Fehler bei freundlichen
+    NPCs. Ohne lesbare Nameplate gilt er nicht mehr als Gegner. Typ 7 bleibt
+    Gegner, 12 und 13 nicht.
+
+>>> TEST IM SPIEL: Deutsch bleibt die Sprache, solange die Sprachwahl nicht
+    auf Russisch steht. Charakterfenster, Arsenal, Händler, Num5, und
+    freundliche NPCs gegen ungepullte Mobs. `/acc objprobe`.
+
+## STAND DAVOR (2026-10-04): FREUNDLICHE NPCS ≠ GEGNER
+
+>>> PROBLEM (User): Ab und zu erscheinen freundliche NPCs als Gegner — im
+    Kampf schwierig (Objekt-Browser / Peilton / Cast-Ansagen).
+
+>>> URSACHE: `CombatSide.IsEnemy` war `BattleNpc && !IsAlly`, und IsAlly
+    nur Begleiter-SubKinds + Gruppe/Allianz. Story-/FATE-/Wach-NPCs mit
+    SubKind `Combatant` fielen dadurch unter Gegner. Hostile wurde früher
+    gemieden aus Angst, ungepulled Packs zu verlieren — das Bit bedeutet aber
+    Spawn-Hostile (Nameplate), nicht Aggro.
+
+>>> FIX: `CombatSide` nutzt `GetNamePlateColorType` wie die sichtbare UI:
+    Feind-Indizes 4–6/7/9–11 → Gegner (7 = ungepulled bleibt); 12/13 →
+    Verbündete. Cast-Warnungen filtern über `CombatSide.IsEnemy`. ObjProbe
+    loggt SubKind, Flags, plate, ally/enemy.
+
+>>> TEST: Zone mit Feinden + freundlichen Kampf-NPCs → Gegner nur Feinde,
+    Freundliche unter Verbündete. Ungepulled-Pack bleibt in Gegner.
+    Trust/Pet/Gruppe weiter Verbündete. Verbündeten-Cast: kein „Gegner wirkt“.
+    `/acc objprobe`: Freundliche plate 12/13 enemy=false; Mobs 7/9/… enemy=true.
+
+## STAND DAVOR (2026-09-28): RELEASE v6.08.35
 
 >>> VERSION: gesprochen / Tag 6.08.35; Assembly/repo.json/Manifest 6.8.35.0
     (.NET streicht führende Nullen). Installer unverändert 1.2.2.0.

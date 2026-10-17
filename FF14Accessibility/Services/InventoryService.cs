@@ -351,32 +351,6 @@ public sealed partial class InventoryService
     }
 
     /// <summary>
-    /// The ONE copy of this item the player owns, so its condition and spiritbond
-    /// can be read. Null when more than one copy exists: the item id alone cannot
-    /// say which copy the cursor is on, and a wrong percentage is worse than none.
-    /// </summary>
-    public unsafe InventoryItem* FindSingleOwnedInstance(uint baseItemId, bool isHq)
-    {
-        if (baseItemId == 0) return null;
-        if (!_data.GetExcelSheet<LuminaItem>().TryGetRow(baseItemId, out var row)) return null;
-        if (row.EquipSlotCategory.RowId == 0) return null;
-
-        InventoryItem* single = null;
-        foreach (var container in BagPages.Concat(GearContainers))
-            foreach (var item in _inventory.GetInventoryItems(container))
-            {
-                if (item.IsEmpty || item.BaseItemId != baseItemId || item.IsHq != isHq) continue;
-                if (item.Address == 0) continue;
-                if (single != null) return null;
-                single = (InventoryItem*)item.Address;
-            }
-
-        if (single != null)
-            _log.Info($"[Inventory] Einziges Exemplar im Bestand: item={baseItemId} hq={isHq}");
-        return single;
-    }
-
-    /// <summary>
     /// Durability of a WORN piece, read from the equipped instance itself - the
     /// same game value DescribeOwnedCondition reads, but here the instance is not
     /// in doubt: a slot wears exactly one copy, so no container scan decides and

@@ -13,7 +13,7 @@ public static partial class AccessibilityStrings
 
 	public static string OptStrongerEnemy => L("Warnung vor stärkeren Gegnern", "Warning about stronger enemies", "Предупреждение о сильных врагах");
 
-	public static string OptQuestObjective => L("Auftragstext im Quest-Tracker", "Quest objective text", "Текст задания в списке заданий");
+	public static string OptQuestObjective => L("Auftragstext und Kartenpunkt", "Quest text and map pin", "Текст задания и точка на карте");
 
 	public static string SupplyPaneEmpty => L("Zurzeit nichts angefordert.", "Nothing requested right now.", "Сейчас запросов нет.");
 

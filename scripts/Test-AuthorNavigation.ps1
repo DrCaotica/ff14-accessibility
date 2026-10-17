@@ -5,7 +5,17 @@ $taskRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $taskManifest = Get-Content -LiteralPath (Join-Path $taskRoot 'docs/maintenance/AUTHOR_NAVIGATION.json') -Raw | ConvertFrom-Json
 foreach ($taskFile in $taskManifest.Files) {
     $taskPath = Join-Path $taskRoot $taskFile.Path
-    if ((Get-FileHash -LiteralPath $taskPath -Algorithm SHA256).Hash -ne $taskFile.Sha256) {
+    # Pins are the LF bytes stored in Git. Windows autocrlf checks the same
+    # text out as CRLF, so CR is removed before the comparison.
+    $taskBytes = [IO.File]::ReadAllBytes($taskPath)
+    $taskLf = New-Object System.Collections.Generic.List[byte]
+    foreach ($taskByte in $taskBytes) {
+        if ($taskByte -ne 13) { [void]$taskLf.Add($taskByte) }
+    }
+    $taskSha = [Security.Cryptography.SHA256]::Create()
+    try { $taskHash = [BitConverter]::ToString($taskSha.ComputeHash($taskLf.ToArray())).Replace('-', '') }
+    finally { $taskSha.Dispose() }
+    if ($taskHash -ne $taskFile.Sha256) {
         throw "Файл автонавигации отличается от версии автора: $($taskFile.Path)"
     }
 }

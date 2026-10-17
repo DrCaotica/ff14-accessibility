@@ -1011,6 +1011,25 @@ Quelle: `FFXIVClientStructs.FFXIV.Client.Game.UI.Map` (Singleton,
   ~5 m Radius, wo Gegner/Fortschritt starten. Kategorie **Quest-Objekte** listet
   diese Auslöser (Sheet-Index + Nähe zum aktuellen Marker-Kreis) zusätzlich zu
   live EventObjs; Ansage „Auslöser: …“; Numpad3 mit engem Stopp in die Mitte.
+- **Quest-Objekt ohne Marker-Objekt (gemessen 2026-10-15, Log 20:49 und
+  Offline-Sheets):** Ein Typ-51-Pin hat `Object=0`. Die Kategorie blieb
+  dadurch leer, obwohl `EObj.Data` des Gegenstandes die Quest-Zeile ist
+  (EObj 2005408, Quest 67124, „frisch[a] Fußspur“). In der Einzelaufgabe
+  Territorium 479 ist `EObj.Data` der drei Spuren leer und `Level.EventId`
+  ebenfalls 0. Die Bindung steht im Questkampf: `TerritoryType.QuestBattle`
+  der Zone ist 111, `QuestBattle.Quest` ist 67124, die Skriptwerte sind
+  Level-Zeilen. Typ 45 davon ist das Event-Objekt (`EOBJ_FOOTPRINT_01` bis
+  `03`, `EOBJ_HIDING_PLACE_01`). Typ 49 ist der Auslöser ohne Kartenpin.
+  Typ 9 bleibt Gegner. `Quest.QuestParams` mit Anweisung `EOBJECT` nennt
+  die EObj-Zeile direkt (`EOBJECT0` = 2005408). Die Kategorie nimmt diese
+  Blatt-Bindung nur für angenommene Quests. Objekte des Questkampfs nur
+  in dessen Territorium. Die Liste „Objekte“ bleibt ungeschnitten.
+  Ab 6.08.123 steht der Typ-49-Auslöser eines Questkampfs unter
+  **Quest-Ziele**, nicht unter Quest-Objekte. Gemessen an Level 5888476:
+  Radius 6,78, kein Kartenpin. Die Ansage beginnt mit „Auslöser:“.
+  Das Wort Kartenpunkt gilt dafür nicht. Typ 9 bleibt Gegner. Unter
+  51 solchen Auslösern liegt der Radius meist bei etwa 7 m, der größte
+  gemessene Wert ist 60.
 
 ### FALLE: `MapMarkerData.DataId` ist KEINE Objekt-Id (gemessen 2026-08-02)
 Das Feld sieht aus wie die Datensatz-Id des Ziel-Objekts, ist es aber nicht:
@@ -1278,6 +1297,41 @@ Events stehen nicht mehr in der Liste; ein neues Festival erscheint von selbst.
 - Läuft das FATE gerade in der Zone, bleibt der Fortschritt in der Kategorie
   „FATEs“. Die Event-Liste nennt den festen Ort auch, solange die Phase läuft.
 - Historisch (nicht mehr im Code): Yo-kai-Territories und `CollabEventFateIds`.
+
+### Mog-Mog-Kollektion, Fest 120 und 256 (offline DE, 2026-10-14)
+`dalamud.log` 07:53 und 07:59: `ActiveFestivals` = 148/0, 256/1, 120/0.
+Die Liste nannte einen Ort. Quest 70337 „Gut gestolpert ist halb gewonnen“,
+Gold Saucer, Festival 148 Phase 0. Chat 07:55 nannte dazu die
+Mog-Mog-Kollektion „Astronomische Abenteuer“, Teil 1, bis 19. Oktober 2026.
+
+Properties mit Festival-Verweis in dieser Lumina-DLL: `Quest.Festival`,
+`SpecialShop.RequiredFestival`, `GilShop.FestivalId`,
+`GroupPoseFrame.Festival`, `GroupPoseStamp.Festival`,
+`WKSDevGrade.FestivalId`. Fest 256 kommt in keiner vor. Fest 120 nur in
+Gruppenposen: Stempel 530–538, Rahmen 31–37. Stempel 537 heißt
+„FAN FESTIVAL 2026“. Kein Territory, keine Koordinate.
+
+`SpecialShop` 1770710, Name „Ungewöhnliche Allagische Steine (neu)“,
+nimmt Item 51750 „Ungewöhnlicher Allagischer Stein der Astronomie I“.
+`RequiredFestival` ist 0. Dieselbe Namenszeile auf Shop 1769929 hängt an
+Festival 88. 88 war an diesem Morgen aus.
+
+`ENpcResident` 1009433, 1009434, 1009435. Englisch „itinerant moogle“,
+deutsch „reisend[a] Mogry“. `CustomTalk` 721462, Skriptname
+`CtsEtcVoyagerMoogle_00566`, Hauptoption „Ungewöhnliche Allagische Steine“.
+`Level` Typ 8, Umrechnung wie `PlacesService.WorldToMapCoord`:
+
+- 4868299, Territory 132 Neu-Gridania, Map 2, Welt (58,3 / −0,6 / 46,9),
+  Karte 12,4 / 12,2.
+- 4868120, Territory 129 Untere Decks, Map 12, Welt (−90,9 / 18,0 / 21,6),
+  Karte 9,4 / 11,7.
+- 4868310, Territory 130 Nald-Kreuzgang, Map 13, Welt (−81,4 / 4,0 / −106,6),
+  Karte 9,6 / 9,1.
+
+Diese Level-Zeilen haben keine Festival-Spalte. Offene Layouts
+`planevent.lgb`, `bg.lgb`, `planlive.lgb` (Use 0 oder 1) haben für 120,
+148 und 256 keine `Layer.FestivalID`. Der Code bleibt beim Quest-Start
+und beim FATE-Slot. Die drei Mogrys sind nicht eingehängt.
 
 ### FF15-Kollab Garuda / Warp-Angriff (2026-09-24)
 - Duty: CFC 646 DE „Durch den Sturm und zurück“ / EN Messenger of the Winds,
@@ -3436,3 +3490,76 @@ Quelle: Keybind-Dump, Log 13:11-13:54, UI-Dumps, Disassembly ffxiv_dx11.exe 2026
   das neue sagt ihn über FollowChatTab). Panels zählen zum Bereich Chat.
   Nachrichtenfeld: ausgewählte Meldung „<Meldung>, n von m“ (TryReadChatPanelSelection),
   leere Meldung „Leere Zeile“, unplausible Auswahl → Log-Warnung [ChatPanel] + „Chat-Meldung nicht lesbar“.
+
+## Windätherquellen (`AetherCurrent`) — gemessen 2026-10-16
+
+Dump `Desktop\FFXIV_UI_Dump.txt` 18:04:10 und dalamud.log 18:03–18:04, Plugin 6.08.123.
+Fenster `AetherCurrent`, Titel WINDÄTHERQUELLEN. Sichtbar war außerdem `_MainCommand`.
+
+- Liste Komponente id 8, `ListLength` 6, `SelectedItemIndex` −1. Die Pfeile bewegen
+  `HoveredItemIndex` (im Log auch Hover 2). Der Renderer mit demselben Index trägt den Text.
+- Je Karte, ListItemRenderer: Text id 3 = Gebietsname, im Dump leer und ohne Sichtbar-Bit.
+  Text id 4 sichtbar: „Keine Informationen verfügbar.“ Text id 5 = „Gebündelt“, versteckt.
+- Die Punkte sind Bilder aus `ui/uld/FlyingPermission.tex`. Beide Lagen sind als sichtbar
+  markiert. Den Füllstand liest man nicht an den Bild-Flags ab.
+- Seiten: RadioButton der obersten Ebene, Knoten 7, 6, 5, 4, 3, Beschriftung „5“ bis „1“.
+  Von links nach rechts ist das Seite 1 bis 5. Im Dump ist „1“ angehakt.
+- `AgentAetherCurrent.TabIndex` ist ein Byte bei Offset 0x70. Die Struct-Größe ist 0x78.
+  Die geladene `FFXIVClientStructs` hat das Feld. Der Seitenwechsel ist `ButtonClick`
+  auf dem Radio. `TabIndex` wird nicht geschrieben. Die Ansage folgt erst, wenn der Wert sich ändert.
+- Blattstand derselben Installation, offline, Deutsch: 31 `AetherCurrentCompFlgSet`,
+  303 `AetherCurrent`, 152 `EObj` mit `Data.RowId` = Strömungs-Id, 152 `Level` dazu.
+  Satz 19 ist Mor Dhona, eine Zeile, und ist keine Karte. Die 30 Karten sind Sätze 1–18 und 20–31.
+  `raw = Karte + 6 * Seite` (beides ab 0). Liegt `raw + 1` unter 19, ist die Satz-Id `raw + 1`,
+  sonst `raw + 2`. Satz 1 hat 9 Einträge, davon 5 Aufträge. Nicht jeder Satz hat 15 Strömungen.
+- `AetherCurrent` hat nur `Quest`. `AetherCurrentCompFlgSet` hat `Territory` und `AetherCurrents`.
+  Feldort: `Level` des `EObj`, und nur in der Territorien-Id des Satzes. Auftragsort: `Quest.IssuerLocation`.
+- `PlayerState.IsAetherCurrentUnlocked` liest Bit `Id - 2818048` (448 Bits).
+  `IsAetherCurrentZoneComplete` ist ein Native-Zeiger und wird wie in `FlightService` abgefangen.
+  Das Bitfeld der abgeschlossenen Sätze ist nicht die Aufdeckung der Karte.
+- Die deutschen Blatt-Aufträge bleiben, wie sie sind. Gemessen, nicht übernommen:
+  2818065 → 67328, 2818066 → 67334, 2818096 → 67365, 2818110 → 67437, 2818328 → 70030.
+- Nummernblock Plus ist VK 0x6B und öffnet sonst das Hauptmenü. Minus ist VK 0x6D.
+  Beide werden nur geschluckt, während `AetherCurrent` den Fokus hat.
+  Die Rüstkammer behält Plus, solange sie die Tasten besitzt.
+- Menüzeile der Freischaltung, gelesen am 17. Oktober 2026 aus dem installierten
+  Blatt `MainCommand`, Deutsch und Englisch: Zeile 67, Name «Windätherquellen» /
+  «Aether Currents», `MainCommandCategory` 4 (Reisen).
+  `UIModule.IsMainCommandUnlocked(67)` ist die Frage des Spiels, ob diese Zeile
+  für die Figur frei ist. Die Methode steht auf `UIModuleInterface` neben
+  `ExecuteMainCommand`. Der Rückgabewert wurde in diesem Plugin noch nicht in
+  einer laufenden Sitzung gemessen. Die Quest-Nummer wird nicht gefragt.
+
+## Ätherkompass — gemessen 2026-10-16, 22:29
+
+dalamud.log, Plugin 6.08.126.
+
+- Die Ergebniszeile kam als Chat `SystemMessage` (57), Kanal Systemnachrichten.
+  Text: „Du spürst eine Quelle 159 Yalme in Richtung Nordwest!“
+  Der Chat-Leser sprach: „System: Du spürst eine Quelle 159 Yalme in Richtung Nordwest!“
+  Es war kein Toast.
+- 22:29:33, Toast des Ortes: „Falkenhorst“. Danach, 22:29:51 bis 22:32:13,
+  die Laufkategorie: `[Aether] Lauf lesbar ziele=0 gesehen=0`.
+- Der Satz nennt Yalme und eine Himmelsrichtung. Eine Koordinate steht nicht darin.
+  Der Mod baut aus dem Satz keinen Punkt. Die Laufstelle bleibt der `Level`-Ort.
+
+## Bodenziel (`ActionManager`) — gelesen 2026-10-16
+
+Installierte `FFXIVClientStructs.dll` vom 13.10.2026, ilspycmd, Typ `ActionManager`.
+
+- `AreaTargetingActionId` bei Offset 144 (0x90). 0 heißt: kein Bodenzielmodus.
+- `AreaTargetingActionType` bei Offset 148 (0x94).
+- `AreaTargetingSpellId` bei Offset 152 (0x98).
+- `AreaTargetingExecuteAtObject` bei Offset 160 (0xA0), Typ `GameObjectId`.
+- `AreaTargetingExecuteAtCursor` bei Offset 192 (0xC0), `bool`.
+- `UseAction` trägt im XML: eine Flächenaktion startet den Modus, statt sofort zu wirken.
+  `UseActionLocation` überspringt den Modus. Der Mod ruft diese Funktion nicht auf
+  und rechnet keine eigene Bodenposition.
+- Dieselbe Feldlage und dieselben Signaturen stehen in der öffentlichen Struct-Quelle.
+  Dort steht am Objektfeld: ist der Wert nicht `0xE0000000`, führt das nächste Update
+  die Flächenaktion an diesem Objekt aus. Am Cursorfeld: ist es wahr, führt das
+  nächste Update sie an der Maus aus. Das ist der Kommentar der Struct-Quelle,
+  kein Eintrag aus `dalamud.log`.
+- Der Mod schreibt bei Nummernblock 0 die Kennung des anvisierten Ziels in das
+  Objektfeld und setzt das Cursorfeld auf falsch. Ohne Ziel schreibt er nichts.
+  Nummernblock 0 wird nur geschluckt, solange `AreaTargetingActionId` nicht 0 ist.

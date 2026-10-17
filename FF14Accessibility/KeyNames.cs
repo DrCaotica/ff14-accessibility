@@ -40,6 +40,12 @@ public static class KeyNames
         // daran. Steht hier einzeln, weil die Numpad-Schleife weiter unten nur
         // Numpad0 bis Numpad9 erzeugt.
         ["NumpadKomma"] = 0x6E,
+
+        // VK_ADD / VK_SUBTRACT. The OEM plus and minus above are different keys.
+        // Numpad plus also opens the main menu, so it is only taken while the
+        // aether-current window itself has focus.
+        ["NumpadPlus"] = 0x6B,
+        ["NumpadMinus"] = 0x6D,
     };
 
     /// <summary>Spoken form for the settings menu; falls back to the config name.</summary>
@@ -49,6 +55,7 @@ public static class KeyNames
         ["Left"] = "Pfeil links", ["Right"] = "Pfeil rechts",
         ["Return"] = "Eingabe", ["Escape"] = "Escape",
         [","] = "Komma", ["."] = "Punkt", ["-"] = "Minus", ["+"] = "Plus",
+        ["NumpadPlus"] = "Nummernblock Plus", ["NumpadMinus"] = "Nummernblock Minus",
     };
 
     private static readonly Dictionary<int, string> VkToNameMap = new();

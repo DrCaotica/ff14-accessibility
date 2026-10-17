@@ -124,24 +124,13 @@ public sealed partial class UIReaderService
         return ShopQuantityEdit.IsUsable(target);
     }
 
-    private unsafe bool TryReadShopQuantityFocus(AtkResNode* node, out string text)
-    {
-        text = string.Empty;
-        if (!TryGetShopQuantity(out var target)) return false;
-        var numeric = (AtkComponentNumericInput*)target.Input;
-        if (!ShopQuantityNodes.IsWithin(node, (AtkResNode*)numeric->OwnerNode)) return false;
-        text = AccessibilityStrings.ShopQuantityValue(ShopItemName(target.ItemName), target.Value)
-            + " " + AccessibilityStrings.ShopQuantityHint(AccessibilityStrings.SpokenKeyLabel(_config.KeyShopQuantity));
-        return true;
-    }
-
     private unsafe string AppendShopQuantityHint(AtkResNode* node, string text)
     {
         if (!TryGetShopQuantity(out var target)) return text;
         var numeric = (AtkComponentNumericInput*)target.Input;
         if (ShopQuantityNodes.IsWithin(node, (AtkResNode*)numeric->OwnerNode)) return text;
         return text + ". " + AccessibilityStrings.ShopQuantityValue(ShopItemName(target.ItemName), target.Value)
-            + " " + AccessibilityStrings.ShopQuantityHint(AccessibilityStrings.SpokenKeyLabel(_config.KeyShopQuantity));
+            + " " + AccessibilityStrings.ShopQuantityEntryHint(AccessibilityStrings.SpokenKeyLabel(_config.KeyShopQuantity));
     }
 }
 

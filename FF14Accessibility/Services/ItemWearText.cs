@@ -41,7 +41,9 @@ internal static unsafe class ItemWearText
     public static string Describe(InventoryItem* item, IDataManager data, IPluginLog log)
     {
         if (item == null || item->ItemId == 0) return string.Empty;
-        if (!data.GetExcelSheet<LuminaItem>().TryGetRow(item->ItemId, out var row)) return string.Empty;
+        // GetItemId carries the HQ flag. The sheet row is the base id.
+        var itemId = ItemSlotService.GetBaseItemId(item->GetItemId());
+        if (itemId == 0 || !data.GetExcelSheet<LuminaItem>().TryGetRow(itemId, out var row)) return string.Empty;
 
         var parts = new List<string>();
         if (row.ClassJobRepair.RowId != 0)
@@ -52,7 +54,7 @@ internal static unsafe class ItemWearText
         if (row.MaterializeType != 0)
             parts.Add($"{AddonText(data, SpiritbondLabelRow)} {SpiritbondPercent(item->GetSpiritbondOrCollectability())} %");
 
-        log.Info($"[Wear] item={item->ItemId} roh: Zustand={item->Condition} Bindung={item->SpiritbondOrCollectability} -> '{string.Join(", ", parts)}'");
+        log.Info($"[Wear] item={itemId} roh: Zustand={item->Condition} Bindung={item->SpiritbondOrCollectability} -> '{string.Join(", ", parts)}'");
         return string.Join(", ", parts);
     }
 

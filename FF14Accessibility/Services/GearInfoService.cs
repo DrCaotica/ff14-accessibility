@@ -238,6 +238,16 @@ public sealed class GearInfoService
         return gear.Length > 0 ? $"{basics}, {gear}" : basics;
     }
 
+    /// <summary>Known equipment label with slots, resolved before translating.</summary>
+    public string ItemLabelByName(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return text;
+        _gearNames ??= BuildGearNameCache();
+        return _gearNames.TryGetValue(text.Trim().ToLowerInvariant(), out var id)
+               && _data.GetExcelSheet<LuminaItem>().TryGetRow(id, out var row)
+            ? EquipmentSpeech.Name(_data, row) : text;
+    }
+
     // ── Tragbarkeits-Prüfung ──
 
     /// <summary>
@@ -381,8 +391,10 @@ public sealed class GearInfoService
             // name and no abbreviation, yet ExpArrayIndex 0 - the pugilist/monk
             // level (offline sqpack 2026-10-06). Checked before the level lookup,
             // or a monk "owns" them and AllowsJob warns about a missing column.
-            var name = job.Name.ExtractText().Trim();
-            if (name.Length == 0) continue;
+            var sheetName = job.Name.ExtractText().Trim();
+            if (sheetName.Length == 0) continue;
+            var name = Loc.IsRussian ? RussianGameText.Name(_data, job, x => x.Name).Trim() : sheetName;
+            if (name.Length == 0) name = sheetName;
 
             var index = job.ExpArrayIndex;
             if (index < 0 || index >= levels.Length) continue;

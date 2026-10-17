@@ -123,6 +123,7 @@ public sealed partial class Plugin : IDalamudPlugin
     private readonly ZoneBorderService _zoneBorders;
     private readonly LevequestEnemyService _leveEnemies;
     private readonly DirectorTodoService _directorTodos;
+    private readonly DutyGuidanceService _dutyGuidance;
     private readonly RouteService       _routes;
     private readonly ShopNpcService     _shops;
     private readonly ObjectNameService  _objectNames;
@@ -184,6 +185,7 @@ public sealed partial class Plugin : IDalamudPlugin
     private readonly OptionsMenu        _options;
     private readonly ToastService       _toasts;
     private readonly CombatService      _combat;
+    private readonly GroundTargetService _ground;
     private readonly AoeWarningService  _aoeWarn;
     private readonly AoeAutoTurnService _aoeAutoTurn;
     // [Warnstimme] Zweiter Sprachkanal fuer die vier Kampfwarnungen.
@@ -233,7 +235,8 @@ public sealed partial class Plugin : IDalamudPlugin
     // 6.08.18 lokal: Chat-Absender Kontextmenü (Strg+Umschalt+BildAuf) + Numpad3-Ziel.
     // 6.08.19: Charakterauswahl — eine Ansage (Name, Job, Ort) statt Scan-Sturm.
     // 6.08.20: Mitstreiter-Taste (PR 27 Port) — Strg+Umschalt+C öffnet/vorliest.
-    private const string PluginVersion    = "6.08.118";
+    // 6.08.128: Windäther-Kategorie erst, wenn das Menü Windätherquellen frei ist.
+    private const string PluginVersion    = "6.08.128";
     // Der Tag nennt, was diese Fassung MITBRINGT, nicht woher sie stammt: die
     // russische Schicht auf dem Stand des Autors 6.08.35 (Auftragstext im
     // Quest-Tracker des Autors, siehe package-Schritt).
@@ -453,10 +456,11 @@ public sealed partial class Plugin : IDalamudPlugin
         // Braucht nur das Item-Sheet: die Antwort kommt aus dem Detail-Agenten
         // des Spiels, den Fokus-Knoten holt er sich selbst (siehe ItemSlotService).
         _itemSlots       = new ItemSlotService(DataManager, Interop, Log);
-        _hotbar       = new HotbarService(DataManager, ClientState, Framework, _gearInfo, _keybinds, _inventoryReader, _tolk, Log);
+        _hotbar       = new HotbarService(DataManager, ClientState, Framework, _gearInfo, _keybinds, _inventoryReader, _tolk, Log, descriptions, SeStringEval);
         _lootRolls    = new LootRollService(DataManager, ClientState, GameGui, _config, _gearInfo, _tolk, Log);
         _equipment    = new EquipmentService(GameInventory, _inventoryReader, DataManager, _gearInfo, _tolk, Log);
-        _questMarkers = new QuestMarkerService(ClientState, DataManager, Log);
+        var questObjects = new QuestObjectCatalog(DataManager, Log);
+        _questMarkers = new QuestMarkerService(ClientState, DataManager, Log, questObjects: questObjects);
         _questObjectives = new QuestObjectiveAnnouncer(AddonLifecycle, _questMarkers, _tolk, Log)
         {
             IsEnabled = () => _config.AnnounceQuestObjectiveChanges,
@@ -511,11 +515,19 @@ public sealed partial class Plugin : IDalamudPlugin
         // fuer Freibrief, Dungeon und FATE gleichermassen (Spielerwunsch
         // 2026-08-18, aufgekommen bei der Freibrief-Suche).
         _directorTodos = new DirectorTodoService(Log);
+        // Neue Auftragssätze und der Kartenpunkt. Dieselbe Option wie der
+        // Quest-Tracker. Die erste Messung nach dem Login bleibt stumm.
+        _dutyGuidance = new DutyGuidanceService(
+            _directorTodos, _questMarkers, ObjectTable, ClientState, _tolk, Log)
+        {
+            IsEnabled = () => _config.AnnounceQuestObjectiveChanges,
+            Suppress = () => !ClientState.IsLoggedIn || _textInputActive || _menu?.IsOpen == true,
+        };
         _routes       = new RouteService(PluginInterface, Log);
         _shops        = new ShopNpcService(DataManager, Log);
         // Shared by browser, target announcement, auto-walk and follow so all
         // four call the same object by the same name (user report 2026-08-08).
-        _objectNames  = new ObjectNameService(DataManager);
+        _objectNames  = new ObjectNameService(DataManager, questObjects);
         // Die Stationen des Wegs DURCH eine Instanz, in Reihenfolge - der
         // Gegenentwurf zu allen anderen Kategorien, die nach Naehe sortieren
         // (Spielerwunsch 2026-08-29: *"eine kategorie die sich dungeon nennt so
@@ -613,6 +625,7 @@ public sealed partial class Plugin : IDalamudPlugin
         // zum Waehler-Eintrag.
         _charaMake  = new CharaMakeReader(ObjectTable, DataManager, GameGui, _tolk, Log, _tooltips);
         _uiReader   = new UIReaderService(AddonLifecycle, GameGui, _tolk, Log, ObjectTable, _inventoryReader, _gearInfo, _bestiary, _huntingLog, _history, _config, DataManager, _tooltips, _charaMake, _lootRolls, _itemSlots, _gatherLog, descriptions);
+        _navigation.AetherWalks = territory => _uiReader.MissingAetherWalks(territory);
         _armouryTransfer = new ArmouryTransferService(DataManager, ClientState, GameGui, _uiReader, _tolk, Log);
         _armouryList = new ArmouryListService(GameGui, ClientState, KeyState, _inventoryReader, _gearInfo, _tolk, Log);
         _chatPlayer = new ChatPlayerService(ObjectTable, DataManager, GameGui, _navigation, _tolk, Log);
@@ -695,6 +708,7 @@ public sealed partial class Plugin : IDalamudPlugin
         _aoeWarn    = new AoeWarningService(_config, Log);
         _warnVoice  = new WarningVoiceService(_config, Log);
         _combat     = new CombatService(ObjectTable, TargetManager, GameGui, DataManager, _tolk, _config, _history, _aoeWarn, _escape, _warnVoice, _leveEnemies, Log, descriptions);
+        _ground     = new GroundTargetService(TargetManager, descriptions, _tolk, Log);
         _aoeAutoTurn = new AoeAutoTurnService(_config, ObjectTable, ClientState, Condition, _combat, Log, _warnVoice, _tolk);
         _cooldown   = new CooldownService(ClientState, DataManager, _cue, _config, Log, ObjectTable);
         _jobGauge   = new JobGaugeService(JobGauges, ObjectTable, DataManager, _tolk, _cue, _config, Log);
@@ -2245,8 +2259,10 @@ public sealed partial class Plugin : IDalamudPlugin
     /// screen; without them a blind player cannot tell what the content is
     /// asking for, nor how far they have got (user request 2026-08-18).
     ///
-    /// On a key and never automatic, on purpose: the list changes on every kill,
-    /// and a line spoken at each change would talk over the fight.
+    /// On the key, the full list including counters, plus the closest in-zone
+    /// quest map pin. Counters stay on the key: a kill must not talk over the
+    /// fight. <see cref="DutyGuidanceService"/> speaks only when the instruction
+    /// text changes, or when that pin moves to a new place.
     ///
     /// The line TEXT is the game's own wording and is passed through untouched -
     /// only the progress behind it is put into words here.
@@ -2256,7 +2272,11 @@ public sealed partial class Plugin : IDalamudPlugin
         var tasks = _directorTodos.GetActiveTasks();
         if (tasks.Count == 0)
         {
-            _tolk.SpeakInterrupt(AccessibilityStrings.NoActiveTasks);
+            var pinOnly = _dutyGuidance.ClosestPinSpeech(tasks);
+            var none = pinOnly.Length == 0
+                ? AccessibilityStrings.NoActiveTasks
+                : AccessibilityStrings.NoActiveTasks + " " + pinOnly;
+            _tolk.SpeakInterrupt(none);
             return;
         }
 
@@ -2275,6 +2295,9 @@ public sealed partial class Plugin : IDalamudPlugin
             foreach (var line in task.Lines)
                 parts.Add($"{line.Text}{line.Detail}{(line.Complete ? AccessibilityStrings.TodoDone : string.Empty)}.");
         }
+
+        var pin = _dutyGuidance.ClosestPinSpeech(tasks);
+        if (pin.Length > 0) parts.Add(pin);
 
         var text = string.Join(" ", parts);
         Log.Info($"[Aufgaben] {text}");
@@ -2631,6 +2654,9 @@ public sealed partial class Plugin : IDalamudPlugin
             _aoeWarn.ApplyFocusMute();
         }
 
+        if (ClientState.IsLoggedIn)
+            _ground.Update(GameWindowFocus.IsActive);
+
         UpdateKeyEdges();
         PollYesNoNativeHold();
         SuppressOwnedWorldConfirmHold();
@@ -2787,6 +2813,33 @@ public sealed partial class Plugin : IDalamudPlugin
             if (IsJustPressed("Escape"))
                 _uiReader.LogEscapeProbe(_menu.IsOpen);
             if (_menu.HandleKeys(_menuInput)) return;
+        }
+
+        // Windätherquellen only. Numpad plus is the game's main menu everywhere
+        // else, and the armoury list uses it while that list owns the keys.
+        if (!_menu.IsOpen && !_hotbar.IsSkillMenuOpen && !_armouryList.OwnsInput
+            && !_uiReader.IsTableReading && !_uiReader.IsShopQuantityEditing
+            && !_uiReader.IsSystemVolumeEditing && GameWindowFocus.IsActive)
+        {
+            var aetherPlus = IsJustPressed("NumpadPlus");
+            var aetherMinus = IsJustPressed("NumpadMinus");
+            if (aetherPlus && _uiReader.TryChangeAetherPage(1))
+            {
+                IsJustPressed("NumpadPlus", consume: true);
+                return;
+            }
+            if (aetherMinus && _uiReader.TryChangeAetherPage(-1))
+            {
+                IsJustPressed("NumpadMinus", consume: true);
+                return;
+            }
+            // Only while the game is already showing the ground circle.
+            // Numpad 0 stays the game's confirm everywhere else.
+            if (IsJustPressed("Numpad0") && _ground.TryThrowOnTarget())
+            {
+                IsJustPressed("Numpad0", consume: true);
+                return;
+            }
         }
 
         if (IsJustPressed(_config.KeyHelp))          _uiReader.AnnounceContextHelp();
@@ -2974,12 +3027,24 @@ public sealed partial class Plugin : IDalamudPlugin
         }
         if (IsJustPressed(_config.KeyEquipBest))     _equipment.EquipRecommended();
         if (IsJustPressed(_config.KeyRandomLook))    _uiReader.PressRandomAppearance();
-        if (IsJustPressed(_config.KeySkillMenu))     _hotbar.ToggleSkillMenu(IsControllerMode());
-        // ContextMenu: nur Auswahl setzen, Numpad0 NICHT schlucken (Spiel-OK).
-        PrepareContextMenuForGameOk();
-        // Notizbuch-Ansichtsumschalter: Num0 erreicht ihn im Spiel nicht, der Mod
-        // schickt zusaetzlich die Klick-Meldung (Taste wird NICHT geschluckt).
-        if (IsJustPressed("Numpad0")) _uiReader.ToggleRecipeViewIfFocused();
+        if (IsJustPressed(_config.KeySkillMenu))
+        {
+            if (_hotbar.IsSkillMenuOpen) _hotbar.CloseSkillMenu();
+            else _hotbar.OpenSkillMenuDirect();
+        }
+        // Numpad0 on a selected world object stays with that object. The player
+        // menu and the context-menu prep run only when that key was not used.
+        // The crafting-log view switch is the same key and only fires when its
+        // button is focused, so it must not run on a world confirm.
+        if (!HandleWorldObjectConfirmKey())
+        {
+            HandlePlayerMenuKey();
+            // ContextMenu: nur Auswahl setzen, Numpad0 NICHT schlucken (Spiel-OK).
+            PrepareContextMenuForGameOk();
+            // Notizbuch-Ansichtsumschalter: Num0 erreicht ihn im Spiel nicht, der Mod
+            // schickt zusaetzlich die Klick-Meldung (Taste wird NICHT geschluckt).
+            if (IsJustPressed("Numpad0")) _uiReader.ToggleRecipeViewIfFocused();
+        }
         // [Job-Anzeige] Zustand auf Nachfrage, ohne auf eine Flanke zu warten.
         if (IsJustPressed(_config.KeyJobGauge))      _jobGauge.AnnounceCurrent();
         HandleFaceWaypointKey();
@@ -3076,6 +3141,9 @@ public sealed partial class Plugin : IDalamudPlugin
         // Spiel bietet sie NUR per Mausklick an, ein blinder Spieler erfaehrt
         // sonst nie, dass sie da ist.
         _dutyActions.Update();
+        // Auftragssatz geändert, oder der Kartenpunkt ist woanders.
+        // Zähler bleiben stumm. Die Taste Strg+Umschalt+F7 liest weiter alles.
+        _dutyGuidance.Update();
         // FF15-Kollab Garuda: Warp-Angriff automatisch auf Monolith/Garuda.
         _nocturneWarp.Update();
         // HP/MP tones on every 10 % step (pan = fill level). Independent of

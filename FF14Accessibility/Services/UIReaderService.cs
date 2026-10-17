@@ -704,6 +704,12 @@ public sealed partial class UIReaderService : IDisposable
         _addonLifecycle.RegisterListener(AddonEvent.PostUpdate, "Trade", OnTradeUpdate);
         _addonLifecycle.RegisterListener(AddonEvent.PreFinalize, "Trade", OnTradeClose);
 
+        // Windätherquellen. The list exists, but its visible text is only the
+        // locked-card placeholder. Page changes and the missing currents are read
+        // here. The generic list summary would say "Menü, 6 Einträge".
+        _addonLifecycle.RegisterListener(AddonEvent.PostUpdate, "AetherCurrent", OnAetherCurrentUpdate);
+        _addonLifecycle.RegisterListener(AddonEvent.PreFinalize, "AetherCurrent", OnAetherCurrentClose);
+
         // -- [Tiefes Gewoelbe] Ergebnisschirm --------------------------
         // Der Schirm am Ende eines Laufs zaehlt die entdeckten Truhen nach FARBE. Er
         // wird vollstaendig ins Log geschrieben, weil der allgemeine Text-Scanner ihn
@@ -1046,6 +1052,12 @@ public sealed partial class UIReaderService : IDisposable
             // tab sentence carries this content itself.
             if (IsSocialChildDuringGrace(name, addon)) return;
 
+            if (name == "AetherCurrent")
+            {
+                SpeakAetherOpen(addon, list);
+                return;
+            }
+
             var sel   = ReadListItemText(list, Math.Max(0, list->SelectedItemIndex));
             var msg   = AccessibilityStrings.ListSummary(sel, count);
             // Queue behind the window title instead of cutting it off
@@ -1126,6 +1138,7 @@ public sealed partial class UIReaderService : IDisposable
         }
         if (name == "Shop" && IsShopQuantityEditing)
             EndShopQuantity(AccessibilityStrings.ShopQuantityChanged);
+        if (name == "AetherCurrent") ResetAetherSpeech();
         _genericTextCache.Remove(name);
         _lastFocusByAddon.Remove(name);
         _lastDialogTexts.Remove(name);
@@ -1341,6 +1354,13 @@ public sealed partial class UIReaderService : IDisposable
             // und uebertoente die Fokusansagen der Kategorien). Weiter warten
             // auf Treffer — nie "Keine Einträge" hier.
             if (name == "ItemSearch") return;
+            if (name == "AetherCurrent")
+            {
+                if ((DateTime.UtcNow - since).TotalSeconds < EmptyListWaitS) return;
+                _emptyListSince.Remove(name);
+                _log.Info("[Aether] Liste bleibt leer.");
+                return;
+            }
 
             if ((DateTime.UtcNow - since).TotalSeconds < EmptyListWaitS) return;
             _emptyListSince.Remove(name);
@@ -1359,6 +1379,11 @@ public sealed partial class UIReaderService : IDisposable
         var sel = ReadListItemText(list, Math.Max(0, list->SelectedItemIndex));
         _log.Info($"[Accessibility] {name}: Liste nachtraeglich gefuellt ({count} Eintraege)");
         if (IsSocialChildDuringGrace(name, addon)) return;
+        if (name == "AetherCurrent")
+        {
+            SpeakAetherOpen(addon, list);
+            return;
+        }
         _tolk.Speak(AccessibilityStrings.ListSummary(sel, count));
     }
 
@@ -1746,6 +1771,11 @@ public sealed partial class UIReaderService : IDisposable
                 // announcing a count that is only true for this frame.
                 if (count <= 0) { _emptyListSince[name] = DateTime.UtcNow; return; }
                 if (IsSocialChildDuringGrace(name, currentAddon)) return;
+                if (name == "AetherCurrent")
+                {
+                    SpeakAetherOpen(currentAddon, lateList);
+                    return;
+                }
                 var sel = ReadListItemText(lateList, Math.Max(0, lateList->SelectedItemIndex));
                 _tolk.Speak(AccessibilityStrings.ListSummary(sel, count));
                 return;
@@ -3873,13 +3903,16 @@ public sealed partial class UIReaderService : IDisposable
             return;
         }
 
-        // Titel-Hauptmenue: AnnounceTitleMenuFocusIfChanged sagt jeden Schritt mit
-        // Position an ("DATENZENTRUM, 2 von 6"). Der generische Leser sprach den
-        // nackten Knopfnamen dazu - beim Blaettern 1 ms davor (sofort ueberdeckt),
-        // beim Oeffnen ~80 ms DANACH, und schnitt so "Hauptmenü. Spiel starten,
-        // 1 von 6" ab (Log 2026-10-10 14:45:27.074 / .164).
+        // Titel-Hauptmenue: der generische Leser sprach nur den nackten
+        // Knopfnamen und schnitt die Eroeffnung ab (Log 2026-10-10
+        // 14:45:27.074 / .164). Er bleibt stumm. Die Position sagt der
+        // Tastaturfokus selbst: Kind-Node 4 ist beim Blaettern auf ALLEN
+        // Knoepfen unsichtbar (dalamud.log 2026-10-14 07:29, jeder
+        // InputReceived), deshalb blieb "Spiel starten" stehen.
         if (IsAddonVisible("_TitleMenu") && FindAddonNameForNode(node) == "_TitleMenu")
         {
+            if (!_titleMenuOpenPending)
+                AnnounceTitleMenuFromKeyboard(node);
             _lastFocusedNodePtr  = (nint)node;
             _lastFocusedNodeText   = string.Empty;
             _lastFocusedNodeStable = string.Empty;
@@ -4326,6 +4359,19 @@ public sealed partial class UIReaderService : IDisposable
                       + $"typ={(int)node->Type} eltern=[{DescribeAncestorTypes(node)}] "
                       + $"nachbarn=[{DescribeSiblingTexts(node)}] "
                       + $"events=[{DescribeFocusEvents(node)}]");
+        }
+
+        // Windätherquellen: a card's own text is the locked placeholder, and the
+        // list reader speaks the card. A page radio would otherwise say only
+        // its digit. Close and other buttons keep the normal focus reader.
+        if (FindAddonNameForNode(node) == "AetherCurrent")
+        {
+            if (AetherRadioOwner(node) != null)
+            {
+                AnnounceAetherRadioFocus(node);
+                return;
+            }
+            if (IsInsideAetherList(node)) return;
         }
 
         // Charaktererstellung: der Fokus allein waehlt nichts aus - das Spiel
@@ -5291,6 +5337,93 @@ public sealed partial class UIReaderService : IDisposable
         return ((AtkUnitBase*)(nint)ptr)->IsVisible;
     }
 
+    /// <summary>Set when a gil shop window opens, cleared once its quantity hint
+    /// has been spoken - so the hint comes once per visit, not on every row.</summary>
+    private bool _shopQuantityHintPending;
+
+    private void OnShopOpen(AddonEvent type, AddonArgs args) => _shopQuantityHintPending = true;
+
+    /// <summary>
+    /// After the first row of a freshly opened shop: where the quantity field is.
+    /// Queued, not interrupting, so the row itself is heard first. Only when the
+    /// focused row really HAS a quantity field - the buyback list of the same
+    /// window does not.
+    /// </summary>
+    private unsafe void MaybeSpeakShopQuantityHint(AtkResNode* node)
+    {
+        if (!_shopQuantityHintPending) return;
+        var row = FindShopRow(node);
+        if (row == null || FindNumericInput(((AtkComponentNode*)row)->Component) == null) return;
+        if (FindAddonNameForNode(node) != "Shop") return;
+
+        _shopQuantityHintPending = false;
+        _tolk.Speak(AccessibilityStrings.ShopQuantityHint);
+    }
+
+    /// <summary>
+    /// The quantity field of a gil shop row. Value and editing state come from
+    /// the component, not from its text, which is zero-padded on the tens digit.
+    /// </summary>
+    private unsafe bool TryReadShopQuantityFocus(AtkResNode* node, out string text)
+    {
+        text = string.Empty;
+        if (node == null) return false;
+
+        AtkComponentNumericInput* input = null;
+        var cur = node->ParentNode;
+        for (var up = 0; up < 2 && cur != null && input == null; up++, cur = cur->ParentNode)
+        {
+            if ((int)cur->Type < 1000) continue;
+            var comp = ((AtkComponentNode*)cur)->Component;
+            if (comp != null && comp->GetComponentType() == ComponentType.NumericInput)
+                input = (AtkComponentNumericInput*)comp;
+        }
+        if (input == null || FindShopRow(node) == null || FindAddonNameForNode(node) != "Shop") return false;
+
+        text = input->IsActive
+            ? AccessibilityStrings.ShopQuantityEditing(input->Value, input->CurrentDigitMultiplier)
+            : AccessibilityStrings.ShopQuantityField(input->Value);
+
+        var raw = $"value={input->Value} aktiv={input->IsActive} stelle={input->CurrentDigitMultiplier}";
+        if (raw != _lastShopQuantityRaw)
+        {
+            _lastShopQuantityRaw = raw;
+            _log.Info($"[Shop] Mengenfeld {raw}");
+        }
+        return true;
+    }
+
+    private string _lastShopQuantityRaw = string.Empty;
+
+    /// <summary>
+    /// Appends the quantity to a gil shop row when the field holds more than 1.
+    /// The row price is then the total, so the count has to be spoken with it.
+    /// </summary>
+    private unsafe string AppendShopRowQuantity(AtkResNode* node, string text)
+    {
+        if (!_shopRowItemActive || string.IsNullOrEmpty(text)) return text;
+
+        var row = FindShopRow(node);
+        if (row == null) return text;
+        var input = FindNumericInput(((AtkComponentNode*)row)->Component);
+        if (input == null || input->Value <= 1 || FindAddonNameForNode(node) != "Shop") return text;
+
+        return text + AccessibilityStrings.ShopRowQuantity(input->Value);
+    }
+
+    /// <summary>The first NumericInput among a component's direct children, or null.</summary>
+    private static unsafe AtkComponentNumericInput* FindNumericInput(AtkComponentBase* comp)
+    {
+        for (var i = 0; comp != null && i < comp->UldManager.NodeListCount; i++)
+        {
+            var child = comp->UldManager.NodeList[i];
+            if (child == null || (int)child->Type < 1000) continue;
+            var c = ((AtkComponentNode*)child)->Component;
+            if (c != null && c->GetComponentType() == ComponentType.NumericInput) return (AtkComponentNumericInput*)c;
+        }
+        return null;
+    }
+
     // Shop windows list gear as bare "name, price" rows - no level, no
     // wearability. While one is open, spoken row texts get the gear info
     // appended when a row part matches an equipment name. Addon names are
@@ -5766,10 +5899,9 @@ public sealed partial class UIReaderService : IDisposable
                 // armoury chest; 2026-10-04: a bare percentage did not say WHICH of
                 // the two it was). Always read from the item INSTANCE, never from
                 // the tooltip text, which trails the cursor - see ItemWearText.
-                // The instance comes from the worn slot in the Character window,
-                // otherwise from the game's own hover resolve; failing both, from
-                // the single owned copy - and stays silent when there are several,
-                // because the item id cannot say which copy the cursor is on.
+                // The worn slot, the sort-mapped owned slot, then the hover hook,
+                // then the single owned copy. Several copies and no resolved
+                // instance stay silent: the item id cannot say which copy it is.
                 var condition       = string.Empty;
                 var conditionSource = "-";
                 if (isCharacterSlot)
@@ -5779,11 +5911,14 @@ public sealed partial class UIReaderService : IDisposable
                 }
                 else if (agentItemId != 0)
                 {
-                    var instance = _itemSlots.TryGetHoveredInstance(itemId);
-                    conditionSource = "hover";
+                    var instance = ItemSlotService.InstanceAt(owned);
+                    conditionSource = instance != null ? "owned" : "hover";
+                    if (instance == null)
+                        instance = _itemSlots.TryGetHoveredInstance(itemId);
                     if (instance == null)
                     {
-                        instance = _inventory.FindSingleOwnedInstance(itemId, ItemSlotService.IsHighQuality(icon->IconId));
+                        instance = _inventory.FindSingleOwnedInstance(
+                            itemId, ItemSlotService.IsHighQuality(icon->IconId));
                         conditionSource = instance != null ? "inventory" : "none";
                     }
                     condition = ItemWearText.Describe(instance, _data, _log);
@@ -12299,7 +12434,7 @@ public sealed partial class UIReaderService : IDisposable
         }
         if (IsAddonVisible("Shop"))
         {
-            _tolk.SpeakInterrupt(AccessibilityStrings.ShopQuantityHint(AccessibilityStrings.SpokenKeyLabel(_config.KeyShopQuantity))
+            _tolk.SpeakInterrupt(AccessibilityStrings.ShopQuantityEntryHint(AccessibilityStrings.SpokenKeyLabel(_config.KeyShopQuantity))
                 + " " + AccessibilityStrings.ShopQuantityInstructions);
             return;
         }
@@ -13185,6 +13320,7 @@ public sealed partial class UIReaderService : IDisposable
 
     public unsafe void ReadCurrentFocus()
     {
+        if (TryReadAetherDetail()) return;
         if (TryReadYesNoDialog()) return;
         if (TryReadSelectOk()) return;
         if (_charaMake.TryReadClass()) return;
@@ -13866,7 +14002,11 @@ public sealed partial class UIReaderService : IDisposable
 
         if (_titleMenuItems.Count == 0) return (string.Empty, -1, 0);
 
-        var focused = FindTitleMenuFocused(addon);
+        // Keyboard focus first. Child id=4 visibility no longer marks the
+        // selected button while arrowing (log 2026-10-14 07:29: id=4 vis=False
+        // on every button). Falling back to the last index then kept the
+        // opening line's item for the whole visit.
+        var focused = ReadTitleMenuKeyboardLabel(addon) ?? FindTitleMenuFocused(addon);
         var index = FindTitleMenuItemIndex(focused);
 
         if (index < 0 && _lastTitleMenuIndex >= 0 && _lastTitleMenuIndex < _titleMenuItems.Count)
@@ -14270,6 +14410,13 @@ public sealed partial class UIReaderService : IDisposable
         else if (state.Hl != prev.Hl && state.Hl.Length > 0)
             idx = int.Parse(state.Hl.Split(' ')[0]);
         if (idx < 0) return;
+
+        // The focus reader is silent on these cards. One line from here.
+        if (name == "AetherCurrent")
+        {
+            AnnounceAetherListMove(list);
+            return;
+        }
 
         // Dedicated row readers give labelled, stable text; the generic reader
         // is the fallback if the structure drifts. Stable text also fixes the
@@ -15898,41 +16045,58 @@ public sealed partial class UIReaderService : IDisposable
     }
 
     /// <summary>
-    /// One line per material row the window shows, plus the crystals. A row
-    /// counts only while it is VISIBLE: the window does not blank the rows a
-    /// recipe leaves unused, it hides them and keeps the previous recipe's text.
-    /// Checking the text alone read Fischtran and Bronzebarren (from Bronzespeer)
-    /// into Ahorn-Bauholz, which needs Ahorn-Holzscheit only (log 2026-10-07
-    /// 21:09:01; the game's own entry listed that one ingredient). Rows are read
-    /// by node id, like the focus reader (see RecipeMaterialFirstRowId).
+    /// One line per material, plus the crystals. When the visible recipe name
+    /// matches the selected entry, the amounts come from that entry and the
+    /// sheet, and the bag is counted in full. Otherwise only VISIBLE window
+    /// rows are used: the window hides unused rows but keeps the previous
+    /// recipe's text (log 2026-10-07 21:09:01, Bronzespeer into Ahorn-Bauholz).
     /// </summary>
     private unsafe List<string> ReadRecipeMaterials(AddonRecipeNote* addon)
     {
-        var lines = new List<string>();
-        var unit = &addon->AtkUnitBase;
+        var game = FFXIVClientStructs.FFXIV.Client.Game.UI.RecipeNote.Instance();
+        var data = game != null && game->IsRecipeListReady ? game->RecipeList : null;
+        var recipe = data != null && data->Recipes != null && data->SelectedIndex < data->RecipeCount
+            ? data->Recipes + data->SelectedIndex : null;
+        var definition = recipe == null ? null : RecipeMaterialReader.FromSheet(_data, recipe->RecipeId);
+        var visibleName = AtkText.ReadClean(addon->SelectedRecipeName);
+        var runtimeName = recipe != null ? AtkText.ReadClean(&recipe->ItemName) : string.Empty;
+        var useRuntime = RecipeMaterialReader.IsComplete(recipe, definition)
+            && RecipeMaterialReader.MatchesSelection(visibleName, runtimeName,
+                recipe != null && Loc.IsRussian ? _inventory.ResolveItemName(recipe->ItemId) : string.Empty);
 
-        for (var id = RecipeMaterialFirstRowId; id <= RecipeMaterialLastRowId; id++)
+        List<string> lines;
+        if (useRuntime)
         {
-            var row = FindTopNode(unit, id);
-            if (row == null || (int)row->Type < 1000 || !row->IsVisible()) continue;
-            var comp = ((AtkComponentNode*)row)->Component;
-            var matName = ReadVisibleChildText(comp, RecipeMaterialNameId, clean: true);
-            if (matName.Length == 0) continue;
-            lines.Add(AccessibilityStrings.RecipeMaterial(
-                matName,
-                ReadVisibleChildText(comp, RecipeMaterialNeededId),
-                ReadVisibleChildText(comp, RecipeMaterialNqOwnedId),
-                ReadVisibleChildText(comp, RecipeMaterialHqOwnedId)));
+            lines = RecipeMaterialReader.Read(addon, recipe, _inventory.ResolveItemName,
+                _inventory.TranslateItemLabel, (id, hq) => _inventory.CountOf(id, hq), definition);
+        }
+        else
+        {
+            lines = new List<string>();
+            var unit = &addon->AtkUnitBase;
+            for (var id = RecipeMaterialFirstRowId; id <= RecipeMaterialLastRowId; id++)
+            {
+                var row = FindTopNode(unit, id);
+                if (row == null || (int)row->Type < 1000 || !row->IsVisible()) continue;
+                var comp = ((AtkComponentNode*)row)->Component;
+                var matName = ReadVisibleChildText(comp, RecipeMaterialNameId, clean: true);
+                if (matName.Length == 0) continue;
+                lines.Add(AccessibilityStrings.RecipeMaterial(
+                    matName,
+                    ReadVisibleChildText(comp, RecipeMaterialNeededId),
+                    ReadVisibleChildText(comp, RecipeMaterialNqOwnedId),
+                    ReadVisibleChildText(comp, RecipeMaterialHqOwnedId)));
+            }
+
+            for (var slot = 0; slot < RecipeCrystalSlotIds.Length; slot++)
+            {
+                var line = DescribeRecipeCrystal(addon, slot);
+                if (line != null) lines.Add(line);
+            }
         }
 
-        // Crystals are icon-only in this window; read by slot node so the slot
-        // index lines up with the sheet's crystal slots (see RecipeCrystalSlotIds).
-        for (var slot = 0; slot < RecipeCrystalSlotIds.Length; slot++)
-        {
-            var line = DescribeRecipeCrystal(addon, slot);
-            if (line != null) lines.Add(line);
-        }
-
+        _log.Info($"[Recipe] Materials: visible='{visibleName}', runtime='{runtimeName}', "
+            + $"matched={useRuntime}, lines={lines.Count}");
         return lines;
     }
 
@@ -16891,7 +17055,12 @@ public sealed partial class UIReaderService : IDisposable
         for (var i = addon->UldManager.NodeListCount - 1; i >= 0; i--)
         {
             var node = addon->UldManager.NodeList[i];
-            if (node == null || (int)node->Type != 1001) continue;
+            // Einstellungen rewrites the same six buttons and clears Visible
+            // (0x10) on the ones that left the list. Log 2026-10-14 07:51:28:
+            // Systemkonfiguration / Installationsinformation / Zurück stay
+            // 0x2033, the other three drop to 0x2023. Counting those said
+            // "Systemkonfiguration, 4 von 6" for a three-entry list.
+            if (node == null || (int)node->Type != 1001 || !IsEffectivelyVisible(node)) continue;
             var comp = ((AtkComponentNode*)node)->Component;
             if (comp == null) continue;
             var btn = (AtkComponentButton*)comp;
@@ -16901,6 +17070,69 @@ public sealed partial class UIReaderService : IDisposable
                 items.Add(text);
         }
         return items;
+    }
+
+    /// <summary>
+    /// Speaks "item, n of m" when the keyboard focus moves to another
+    /// _TitleMenu button. The generic reader stays silent for this addon.
+    /// </summary>
+    private unsafe void AnnounceTitleMenuFromKeyboard(AtkResNode* node)
+    {
+        var addon = FindAddonForNode(node);
+        if (addon == null || !addon->IsReady) return;
+
+        var label = ReadTitleMenuButtonLabel(node);
+        if (string.IsNullOrWhiteSpace(label)) return;
+
+        var items = ReadTitleMenuItems(addon);
+        if (items.Count == 0) return;
+
+        _titleMenuItems.Clear();
+        _titleMenuItems.AddRange(items);
+
+        var index = FindTitleMenuItemIndex(label);
+        if (index < 0) return;
+        var item = items[index];
+        if (index == _lastTitleMenuIndex && item == _lastTitleMenuText) return;
+
+        RememberTitleMenuSelection(item, index);
+        _tolk.SpeakInterrupt(FormatTitleMenuSelection(item, index, items.Count));
+        _log.Info($"[Accessibility] _TitleMenu Tastatur: '{item}', {index + 1} von {items.Count}");
+    }
+
+    /// <summary>
+    /// Label of the title-menu button that currently owns the keyboard focus,
+    /// or null when the focus is not inside this addon.
+    /// </summary>
+    private unsafe string? ReadTitleMenuKeyboardLabel(AtkUnitBase* addon)
+    {
+        if (addon == null) return null;
+        var stage = AtkStage.Instance();
+        if (stage == null || stage->AtkInputManager == null) return null;
+        var node = stage->AtkInputManager->FocusedNode;
+        if (node == null || FindAddonForNode(node) != addon) return null;
+        return ReadTitleMenuButtonLabel(node);
+    }
+
+    /// <summary>
+    /// Button label under a focused node. The focus sits on a child (collision
+    /// id=6 in the 2026-09-05 log); the label is the button's ButtonTextNode.
+    /// </summary>
+    private unsafe string? ReadTitleMenuButtonLabel(AtkResNode* node)
+    {
+        var cur = node;
+        for (var up = 0; up < 8 && cur != null; up++, cur = cur->ParentNode)
+        {
+            if ((int)cur->Type != 1001) continue;
+            var comp = ((AtkComponentNode*)cur)->Component;
+            if (comp == null) continue;
+            var btn = (AtkComponentButton*)comp;
+            if (btn->ButtonTextNode == null) continue;
+            var text = AtkText.Read(btn->ButtonTextNode).Trim();
+            if (!string.IsNullOrWhiteSpace(text) && text.Length > 1)
+                return text;
+        }
+        return null;
     }
 
     private unsafe string? FindTitleMenuFocused(AtkUnitBase* addon)
@@ -17613,6 +17845,8 @@ public sealed partial class UIReaderService : IDisposable
         _addonLifecycle.UnregisterListener(AddonEvent.PostUpdate, "Bank", OnBankUpdate);
         _addonLifecycle.UnregisterListener(AddonEvent.PostUpdate, "Trade", OnTradeUpdate);
         _addonLifecycle.UnregisterListener(AddonEvent.PreFinalize, "Trade", OnTradeClose);
+        _addonLifecycle.UnregisterListener(AddonEvent.PostUpdate, "AetherCurrent", OnAetherCurrentUpdate);
+        _addonLifecycle.UnregisterListener(AddonEvent.PreFinalize, "AetherCurrent", OnAetherCurrentClose);
         _addonLifecycle.UnregisterListener(OnSelectStringOpen);
         _addonLifecycle.UnregisterListener(AddonEvent.PostSetup, "Request", OnRequestOpen);
         _addonLifecycle.UnregisterListener(AddonEvent.PostSetup, "Title", OnTitleScreenOpen);

@@ -2,7 +2,7 @@ namespace FF14Accessibility.Services;
 
 public static partial class AccessibilityStrings
 {
-    public static string ShopQuantityHint(string key) => L(
+    public static string ShopQuantityEntryHint(string key) => L(
         $"Menge eingeben: {key}.", $"Enter quantity: {key}.", $"Ввести количество: {key}.");
 
     public static string ShopQuantityValue(string name, int value) => L(

@@ -15,25 +15,46 @@ public static partial class AccessibilityStrings
     // NOT the OS culture directly. Auto still falls back to the OS culture.
     private static bool IsGerman => Loc.IsGerman;
 
-    public static string TitleScreen => IsGerman ? "Titelbildschirm" : "Title screen";
-    public static string MainMenu => IsGerman ? "Hauptmenü" : "Main menu";
+    /// <summary>
+    /// Picks the text for the active announcement language.
+    ///
+    /// The Russian text is optional on purpose: a string that has not been
+    /// translated yet keeps working and simply stays English. That way the
+    /// Russian pass can grow one section at a time instead of having to land
+    /// as one lump; the untranslated ones are English rather than silent.
+    /// </summary>
+    internal static string L(string de, string en, string? ru = null)
+        => Loc.IsRussian ? ru ?? en : IsGerman ? de : en;
+
+    /// <summary>
+    /// Authored character descriptions keep the upstream DE/EN table. Russian
+    /// translations match the complete English text in a separate offline catalog.
+    /// A new or changed entry keeps its original wording until translated.
+    /// </summary>
+    internal static string LocText(string de, string en)
+        => L(de, en, Loc.IsRussian ? RussianCharacterText.Find(en) : null);
+
+    public static string TitleScreen => L("Titelbildschirm", "Title screen", "Титульный экран");
+    public static string MainMenu => L("Hauptmenü", "Main menu", "Главное меню");
 
     /// <summary>Icon button in a character select row; opens CharaSelectCharaConfigMain (backup of that character's settings).
     /// Wording follows the game's own entry for the same function in the row's context menu
     /// ("Charaktereinstellungen sichern", log 2026-10-10 14:35:57).</summary>
     public static string CharaSelectCharaConfigButton =>
-        IsGerman ? "Charaktereinstellungen sichern, Knopf" : "Back up character settings, button";
+        L("Charaktereinstellungen sichern, Knopf", "Back up character settings, button", "Сохранить настройки персонажа, кнопка");
     /// <summary>Icon button next to "New Character"; opens CharaSelectSystemConfigMain (backup of the system settings).</summary>
     public static string CharaSelectSystemConfigButton =>
-        IsGerman ? "Systemkonfiguration sichern, Knopf" : "Back up system configuration, button";
-    public static string Back => IsGerman ? "Zurück" : "Back";
-    public static string NoHelpAvailable => IsGerman ? "Keine Hilfe verfügbar" : "No help available";
-    public static string HelpForTitle => IsGerman
-        ? "Enter öffnet das Hauptmenü. Strg+F1 sagt diese Hilfe erneut an."
-        : "Press Enter to open the main menu. Press Ctrl+F1 to hear this help again.";
-    public static string HelpForTitleMenu => IsGerman
-        ? "Pfeil hoch und runter zum Wechseln, Enter zum Bestätigen, Escape zurück, Strg+F1 für Hilfe."
-        : "Use up and down arrow keys to move, Enter to confirm, Escape to go back, Ctrl+F1 for help.";
+        L("Systemkonfiguration sichern, Knopf", "Back up system configuration, button", "Сохранить системные настройки, кнопка");
+    public static string Back => L("Zurück", "Back", "Назад");
+    public static string NoHelpAvailable => L("Keine Hilfe verfügbar", "No help available", "Справка недоступна");
+    public static string HelpForTitle => L(
+        "Enter öffnet das Hauptmenü. Strg+F1 sagt diese Hilfe erneut an.",
+        "Press Enter to open the main menu. Press Ctrl+F1 to hear this help again.",
+        "Enter открывает главное меню. Ctrl+F1 повторит эту справку.");
+    public static string HelpForTitleMenu => L(
+        "Pfeil hoch und runter zum Wechseln, Enter zum Bestätigen, Escape zurück, Strg+F1 für Hilfe.",
+        "Use up and down arrow keys to move, Enter to confirm, Escape to go back, Ctrl+F1 for help.",
+        "Стрелки вверх и вниз переключают, Enter подтверждает, Escape возвращает назад, Ctrl+F1 — справка.");
 
     public static string Confirmed(string item) =>
         L($"Auswahl bestätigt: {item}", $"Confirmed: {item}", $"Выбор подтверждён: {item}");
@@ -622,6 +643,7 @@ public static partial class AccessibilityStrings
         // Wort "alle" ist genau der Unterschied zwischen beiden.
         NavCategory.WorldDuties      => L("Alle Inhalte", "All duties", "Все инстансы"),
         NavCategory.Aetherytes       => L("Ätheryten", "Aetherytes", "Эфириты"),
+        NavCategory.AetherCurrents   => L("Windäther", "Aether currents", "Эфирные течения"),
         NavCategory.QuestGoals       => L("Quest-Ziele", "Quest goals", "Цели заданий"),
         NavCategory.AcceptableQuests => L("Annehmbare Quests", "Available quests", "Доступные задания"),
         NavCategory.Levequests       => L("Freibriefe", "Levequests", "Ливквесты"),
@@ -1291,6 +1313,31 @@ public static partial class AccessibilityStrings
     /// <summary>Marks a task line the game shows as done.</summary>
     public static string TodoDone => L(", erledigt", ", done", ", выполнено");
 
+    /// <summary>
+    /// A duty or quest instruction whose words just changed. The sentence is
+    /// the game's own text, including its closing period.
+    /// </summary>
+    public static string DutyInstructionChanged(string text) =>
+        L($"Neue Aufgabe. {text}", $"New task. {text}", $"Новое задание. {text}");
+
+    /// <summary>Closest accepted-quest map pin. Distance is already formatted.</summary>
+    public static string QuestMapPin(string name, string distance, string compass) =>
+        L($"Kartenpunkt, {name}, {distance}, {compass}.",
+            $"Map pin, {name}, {distance}, {compass}.",
+            $"Точка на карте, {name}, {distance}, {compass}.");
+
+    /// <summary>The player is already inside that pin's circle.</summary>
+    public static string QuestMapPinInside(string name) =>
+        L($"Kartenpunkt, {name}, im Zielkreis.",
+            $"Map pin, {name}, inside the goal area.",
+            $"Точка на карте, {name}, в круге цели.");
+
+    /// <summary>Distance to the edge of the pin's circle. Distance is already formatted.</summary>
+    public static string QuestMapPinEdge(string name, string distance, string compass) =>
+        L($"Kartenpunkt, {name}, noch {distance} bis zum Zielkreis, {compass}.",
+            $"Map pin, {name}, {distance} to the goal area, {compass}.",
+            $"Точка на карте, {name}, до круга цели ещё {distance}, {compass}.");
+
     public static string NoLevequests =>
         L("Keine Freibriefe. Erst bei einem Freibrief-Geber annehmen.", "No levequests. Accept one from a levemete first.", "Ливквестов нет. Сначала возьми у того, кто их выдаёт.");
 
@@ -1825,8 +1872,8 @@ public static partial class AccessibilityStrings
             ? $"{label}. Setzt nach einer Rückfrage alle Einstellungen auf die Vorgabe des Spiels zurück."
             : $"{label}. Resets all settings to the game's defaults after a confirmation.";
 
-    public static string TabPressedNoPageChange => IsGerman ? "Reiter gedrückt, aber kein Seitenwechsel erkannt." : "Tab pressed, but no page change detected.";
-    public static string TabNotResponding => IsGerman ? "Reiter reagiert nicht." : "Tab not responding.";
+    public static string TabPressedNoPageChange => L("Reiter gedrückt, aber kein Seitenwechsel erkannt.", "Tab pressed, but no page change detected.", "Вкладка нажата, но смены страницы не произошло.");
+    public static string TabNotResponding => L("Reiter reagiert nicht.", "Tab not responding.", "Вкладка не отвечает.");
 
     // ── HUD-Fokus (Numpad1, PAD_HUDFOCUS) ───────────────────────────
     // Numpad1 cycles the cursor through these HUD areas (log 2026-10-11
@@ -4353,19 +4400,26 @@ public static partial class AccessibilityStrings
         IsGerman ? $"Im Beutel {nq} NQ, {hq} HQ" : $"In bag {nq} NQ, {hq} HQ";
     /// <summary>One material line. NQ and HQ are always both named (user decision
     /// 2026-08-08): HQ material raises starting quality, so a silent zero would
-    /// hide a real choice.</summary>
+    /// hide a real choice. The total is the sum of both stocks.</summary>
     public static string RecipeMaterial(string name, string needed, string nq, string hq) =>
-        IsGerman ? $"{name}, {needed} benötigt, {nq} NQ, {hq} HQ"
-                 : $"{name}, {needed} needed, {nq} NQ, {hq} HQ";
+        MaterialWithStock(name, needed, nq, hq);
     /// <summary>A crystal slot. The window shows crystals as icons only, so the
     /// name comes from the recipe's own data; when that join cannot be confirmed
     /// the slot is called "crystal" rather than given a guessed name.</summary>
     public static string RecipeCrystal(string name, string needed, string owned)
     {
-        if (name.Length == 0) name = IsGerman ? "Kristall" : "Crystal";
-        return IsGerman ? $"{name}, {needed} benötigt, {owned} im Beutel"
-                        : $"{name}, {needed} needed, {owned} in bag";
+        if (name.Length == 0) name = L("Kristall", "Crystal", "Кристалл");
+        return L($"{name}, {CraftingCount(needed)} benötigt, vorhanden {CraftingCount(owned)}",
+                 $"{name}, need {CraftingCount(needed)}, have {CraftingCount(owned)}",
+                 $"{name}, нужно {CraftingCount(needed)}, есть {CraftingCount(owned)}");
     }
+
+    /// <summary>A crystal row without a resolved item name. The window shows
+    /// crystals as icons only, so the element stays unnamed rather than guessed.</summary>
+    public static string RecipeCrystal(string needed, string owned) =>
+        L($"Kristall, {CraftingCount(needed)} benötigt, vorhanden {CraftingCount(owned)}",
+          $"Crystal, need {CraftingCount(needed)}, have {CraftingCount(owned)}",
+          $"Кристалл, нужно {CraftingCount(needed)}, есть {CraftingCount(owned)}");
     /// <summary>A crystal slot the selected recipe does not use.</summary>
     public static string RecipeCrystalEmpty =>
         IsGerman ? "Kristall-Platz, leer" : "Crystal slot, empty";
@@ -4517,8 +4571,8 @@ public static partial class AccessibilityStrings
     /// <summary>Focused icon tab with its game-given name: "Grafik, Reiter 3 von 8."</summary>
     public static string TabNamePosition(string name, int index, int count) =>
         IsGerman ? $"{name}, Reiter {index} von {count}." : $"{name}, tab {index} of {count}.";
-    public static string EmptyList => IsGerman ? "Leere Liste." : "Empty list.";
-    public static string DialogWord => IsGerman ? "Dialog." : "Dialog.";
+    public static string EmptyList => L("Leere Liste.", "Empty list.", "Список пуст.");
+    public static string DialogWord => L("Dialog.", "Dialog.", "Диалог.");
 
     // ── Weltenwahl (TitleDCWorldMap) ────────────────────────────────
     public static string DataCenterRegions(string regions) =>

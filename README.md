@@ -7,6 +7,22 @@ Spieler** zugänglich macht: Menüs, Dialoge, Quests, Navigation, Inventar,
 Kampf und Aktionsleisten werden per Screenreader (NVDA) vorgelesen und mit
 Tönen unterstützt — inklusive Braillezeile und automatischem Laufen.
 
+## Neu in 6.08.128
+
+Update im Spiel: Optionsmenü, Aktualisierung, Nach Aktualisierung suchen.
+Gesprochene Version 6.08.128. Der Installer bleibt 1.2.2.
+
+Seit 6.08.35 unter anderem: Inventar nach Kategorien (Strg+F3) und das
+Spielmenü des Gegenstands, Arsenal nach Klassen, Handel lesen, Jagd mit
+Standort und Stockwerk, Windäther-Fenster und Anlaufen der fehlenden Quellen,
+Bodenziel auf das gewählte Ziel, Quest-Objekte und Verfolgungsziel,
+Stolperville als Ton und Richtung ohne eigenen Lauf, russische Ansage wenn
+die Sprache Russisch ist.
+
+Nicht enthalten: BossMod, das AutoDuty-Plugin, AccessibleVendorSell, die
+Rezept-Kategorie, Mahjong und Arsenal ins Inventar.
+[Ausführlich](docs/releases/6.08.128.md).
+
 ## Funktionen
 
 ### Menüs und Fenster

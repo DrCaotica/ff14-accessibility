@@ -72,7 +72,7 @@ public enum SlotWait
     AgentOpening,
 }
 
-public sealed unsafe class ItemSlotService : IDisposable
+public sealed unsafe partial class ItemSlotService : IDisposable
 {
     private readonly IDataManager _data;
     private readonly IPluginLog _log;
@@ -118,14 +118,29 @@ public sealed unsafe class ItemSlotService : IDisposable
     public InventoryItem* TryGetHoveredInstance(uint baseItemId)
     {
         var (type, slot, itemId) = _lastHovered;
-        if (baseItemId == 0 || itemId != baseItemId || slot < 0) return null;
+        if (baseItemId == 0 || GetBaseItemId(itemId) != baseItemId || slot < 0) return null;
 
         var inventory = InventoryManager.Instance();
         var container = inventory == null ? null : inventory->GetInventoryContainer(type);
-        if (container == null || slot >= container->Size) return null;
+        if (container == null || container->Items == null || slot >= container->Size) return null;
 
-        var item = container->GetInventorySlot(slot);
-        return item != null && item->ItemId == baseItemId ? item : null;
+        var item = container->Items + slot;
+        return GetBaseItemId(item->GetItemId()) == baseItemId ? item : null;
+    }
+
+    /// <summary>The live instance behind an owned slot the sort map already resolved.</summary>
+    internal static InventoryItem* InstanceAt(OwnedSlot owned)
+    {
+        if (owned.Status != OwnedSlotStatus.Ready || owned.PhysicalSlot < 0 || owned.ItemId == 0)
+            return null;
+
+        var inventory = InventoryManager.Instance();
+        var container = inventory == null ? null : inventory->GetInventoryContainer(owned.Container);
+        if (container == null || container->Items == null || owned.PhysicalSlot >= container->Size)
+            return null;
+
+        var item = container->Items + owned.PhysicalSlot;
+        return GetBaseItemId(item->GetItemId()) == owned.ItemId ? item : null;
     }
 
     /// <summary>What the game adds to an icon id to draw its HQ variant. The Item
@@ -177,7 +192,7 @@ public sealed unsafe class ItemSlotService : IDisposable
         // it, and TryGetHoveredInstance's item check discards it if it is stale.
         var found = outItem == null ? null : *outItem;
         if (result && found != null && container != null && slot != null)
-            _lastHovered = (*container, *slot, found->ItemId);
+            _lastHovered = (*container, *slot, found->GetItemId());
         return result;
     }
 

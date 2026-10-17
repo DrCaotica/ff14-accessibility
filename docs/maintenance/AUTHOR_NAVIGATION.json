@@ -1,11 +1,12 @@
 {
   "Repository": "https://github.com/derbruedi/ff14-accessibility",
   "Commit": "e006e9de6aefc4f7b6246782f225fa52389e3b63",
+  "Note": "Pins are SHA-256 of LF bytes. CR is stripped before compare so a Windows autocrlf checkout matches. Since e006e9d only three pins moved: AutoWalkService speaks no mesh progress without a player; TryResolveMarkerDestination uses the hunt floor pick; BuildHuntSearch can prefer spawn rows. The other pinned files still match that commit.",
   "PreviousForkCommit": "2ae243150c9d65061c5386afdb42173f82f13983",
   "Files": [
     {
       "Path": "FF14Accessibility/Services/AutoWalkService.cs",
-      "Sha256": "e79a4312ef704cbc8192606658b65cb8e20f6734b23179321d6855af707c99db"
+      "Sha256": "2048ed16b535e142ad4e50fedb571b6cbe9ba1178713ec25449c845c41e00ac7"
     },
     {
       "Path": "FF14Accessibility/Services/NavmeshIpc.cs",
@@ -55,7 +56,7 @@
   "Resolver": {
     "Path": "FF14Accessibility/Plugin.cs",
     "Signature": "    private MarkerResolve TryResolveMarkerDestination(",
-    "Sha256": "b60d3ed65b59b808a39ce27fe016c0eec8da10f38c0cda816376d10901e6263c"
+    "Sha256": "f86c3c4561e43f02b8d6ab3dec8a82611630526d19ce2a52aee630aae8e57289"
   },
   "RemovedFiles": [
     "FF14Accessibility/Services/AutoWalkService.Context.cs",
@@ -90,6 +91,6 @@
   "HuntSearch": {
     "Path": "FF14Accessibility/Services/NavigationService.cs",
     "Signature": "    private void BuildHuntSearch(",
-    "Sha256": "dd4084cde78432ed4620f4da8da6930cf8fd739398e8da76afe186f95e5be9a2"
+    "Sha256": "b41e3cffecf1eb4ac6da53072e1094f6093a1dfefe9c714f1652b1defedee9ec"
   }
 }

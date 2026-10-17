@@ -7,6 +7,22 @@ players**: menus, dialogues, quests, navigation, inventory, combat and
 hotbars are read aloud via screen reader (NVDA) and supported with audio
 cues — including braille display output and automatic walking.
 
+## New in 6.08.128
+
+In-game update: options menu, update, search for an update.
+Spoken version 6.08.128. The installer stays 1.2.2.
+
+Since 6.08.35 this includes, among other things, inventory by category
+(Ctrl+F3) and the game menu of an item, the armoury by class, a spoken
+trade window, hunt sites and floor points, the aether current window and
+walking to missing currents, ground target on the selected target, quest
+objects and a chase point, Blunderville as tone and direction without
+moving the character, and Russian speech when the language is Russian.
+
+Not included: BossMod, the AutoDuty plugin, AccessibleVendorSell, the
+craft-recipe category, Mahjong, and moving armoury items into bags.
+[Details](docs/releases/6.08.128.md).
+
 ## Features
 
 ### Menus and windows
