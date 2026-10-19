@@ -35,7 +35,8 @@ public sealed class PositionalVoiceService : IDisposable
     private string _lastSpoken = string.Empty;
     private long _lastSpokenTick;
 
-    /// <summary>Names of all enabled SAPI voices, in the order the options menu
+    /// <summary>Names of all enabled SAPI voices that SAPI also lets us select
+    /// (see <see cref="CanSelect"/>), in the order the options menu
     /// offers them.</summary>
     public IReadOnlyList<string> InstalledVoices { get; private set; } = Array.Empty<string>();
 
@@ -63,7 +64,7 @@ public sealed class PositionalVoiceService : IDisposable
             synth.SetOutputToDefaultAudioDevice();
 
             InstalledVoices = synth.GetInstalledVoices()
-                                   .Where(v => v.Enabled)
+                                   .Where(v => v.Enabled && CanSelect(synth, v.VoiceInfo.Name))
                                    .Select(v => v.VoiceInfo.Name)
                                    .ToList();
 
@@ -87,9 +88,34 @@ public sealed class PositionalVoiceService : IDisposable
     }
 
     /// <summary>
+    /// Whether SAPI actually lets this voice be selected. GetInstalledVoices can
+    /// list a voice as enabled that SelectVoice then refuses: on the user's PC
+    /// "Nvda Sapi" (the NVDA bridge) fails with "No matching voice is installed
+    /// or the voice was disabled", reproduced outside the game (2026-10-19).
+    /// Why it refuses is not known. A voice SAPI refuses would make every
+    /// utterance fail, so it is neither offered nor chosen automatically.
+    /// try-catch: SelectVoice is the external COM call that gives the verdict;
+    /// a refusal is logged, not swallowed.
+    /// </summary>
+    private bool CanSelect(SpeechSynthesizer synth, string voiceName)
+    {
+        try
+        {
+            synth.SelectVoice(voiceName);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            _log.Warning($"[Lagestimme] Voice '{voiceName}' is listed but cannot be selected " +
+                         $"({ex.GetType().Name}: {ex.Message}) - not offered.");
+            return false;
+        }
+    }
+
+    /// <summary>
     /// The voice for one language: the configured one while it is installed,
-    /// else the first enabled male voice of that language, else the first
-    /// enabled voice of that language. Null = nothing fits; the synthesizer
+    /// else the first usable male voice of that language, else the first
+    /// usable voice of that language. Null = nothing fits; the synthesizer
     /// then keeps whatever voice it has.
     /// </summary>
     public string? ResolveVoiceName(bool german)
@@ -102,7 +128,7 @@ public sealed class PositionalVoiceService : IDisposable
 
         var want = german ? "de" : "en";
         var ofLanguage = _synth.GetInstalledVoices()
-            .Where(v => v.Enabled
+            .Where(v => InstalledVoices.Contains(v.VoiceInfo.Name)
                      && v.VoiceInfo.Culture.TwoLetterISOLanguageName.Equals(want, StringComparison.OrdinalIgnoreCase))
             .ToList();
 
@@ -197,7 +223,8 @@ public sealed class PositionalVoiceService : IDisposable
         }
         catch (Exception ex)
         {
-            _log.Error($"[Lagestimme] Preview of '{voiceName}' failed ({ex.GetType().Name}: {ex.Message}).");
+            var tried = voiceName.Length > 0 ? voiceName : $"automatic: {ResolveVoiceName(german) ?? "-"}";
+            _log.Error($"[Lagestimme] Preview of '{tried}' failed ({ex.GetType().Name}: {ex.Message}).");
             return false;
         }
     }
